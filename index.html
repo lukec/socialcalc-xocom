@@ -1,0 +1,51 @@
+<html>
+    <head>
+        <title>Foo</title>
+    </head>
+    <script type="text/javascript">
+        document.set_msg = function (msg) {
+            document.getElementById('baz').innerHTML = msg;
+        }
+
+        document.observer = {
+          observe: function(subject,topic,data){
+            document.set_msg("Topic sent: " + topic + " - " + data);
+          }
+        };
+
+   
+        function foo_button(self) {
+          try {
+            netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");  
+            var observerService = Components.classes["@mozilla.org/observer-service;1"]
+                .getService(Components.interfaces.nsIObserverService);
+            observerService.addObserver(document.observer,"my-topic",false);
+            observerService.notifyObservers(self,"my-topic","foo");
+          }
+          catch(err) {
+              document.set_msg(err)
+          }
+        }
+        function bar_button(self) {
+          try {
+            netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");  
+            var observerService = Components.classes["@mozilla.org/observer-service;1"]
+                .getService(Components.interfaces.nsIObserverService);
+            observerService.addObserver(document.observer,"my-topic",false);
+            observerService.notifyObservers(self,"my-topic","bar");
+          }
+          catch(err) {
+              document.set_msg(err)
+          }
+        }
+
+    </script>
+    <body>
+        <form>
+            <input type="button" name="foo" value="Foo" onClick="foo_button()">
+            <input type="button" name="bar" value="Bar" onClick="bar_button()">
+        </form>
+        <div id="baz">Empty</div>
+    </body>
+</html>
+

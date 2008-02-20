@@ -1,0 +1,11 @@
+save:
+* python fires event to say "start saving"
+* js fires event to say "ready to save"
+* python reads textContent from event target
+* python saves to disk
+
+load:
+* python reads from disk
+* python writes content into dom
+* python fires event to say "ready to load"
+
