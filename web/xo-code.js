@@ -30,7 +30,8 @@ var XO = window.XO = {
     },
     observer: {
       observe: function(req_obj,topic,command) {
-        XO.set_status("Handling " + command)
+        now = new Date().getTime()
+        XO.set_status("(" + now + ") Handling " + command)
         try {
           // We need access to use the XPCom functions below
           netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect")
@@ -46,7 +47,7 @@ var XO = window.XO = {
           }
 
           // Execute the registered callback method
-          return_value = XO.callbacks[command](command_arg)
+          return_value = XO.callbacks[command](command_arg) || ''
 
           // Wrap the return value back into the XPCom object
           var result = Components.classes["@mozilla.org/supports-string;1"].createInstance(
@@ -54,7 +55,7 @@ var XO = window.XO = {
           result.data = return_value
           req_obj.clear()
           req_obj.appendElement(result, false)
-          XO.set_status("Handled " + command)
+          XO.set_status("(" + now + ") Handled " + command + ": (" + return_value + ")")
         }
         catch (err) {
           XO.set_status("Error handling event: " + err)

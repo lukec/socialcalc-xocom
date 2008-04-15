@@ -16,16 +16,18 @@
             jQuery('textarea').html(data)
         })
         XO.register('write', function() {
-            return jQuery('textarea').html()
+            var content = jQuery('textarea').val()
+            jQuery('#app-status').html("Writing (" + content + ")")
+            return content
         })
         setTimeout( function () {
             jQuery('#app-status').html("Registered XO Hooks")
         }, 50)
     </script>
     <body>
-        XO Status:<div id="xo-status">No status</div><br />
-        App Status:<div id="app-status">No status</div><br />
-        <textarea rows="30" cols="80">Default text</textarea>
+        XO Status: <span id="xo-status">No status</span><br />
+        App Status: <span id="app-status">No status</span><br />
+        <textarea rows="30" cols="80"></textarea>
     </body>
 </html>
 
