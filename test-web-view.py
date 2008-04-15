@@ -6,7 +6,8 @@ hulahop.startup(os.path.expanduser('~/.test-hulahop'))
 from XOCom import XOCom
 
 # The XOCom object helps us communicate with the browser
-xocom = XOCom()
+uri = 'file:///home/olpc/src/testapp/index.html'
+xocom = XOCom(uri)
 
 # This is just a simple way to trigger events from python for testing
 # Handler for keypresses in the GTK Application

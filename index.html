@@ -1,26 +1,27 @@
 <html>
     <head>
-        <title>Foo</title>
+      <title>XOCom Example</title>
     </head>
     <script type="text/javascript" src="web/jquery.js"></script>
     <script type="text/javascript" src="web/xo-code.js"></script>
-    <body>
-        <div id="xostatus">No status</div><br />
-        <textarea width="600" height="400">Default text</textarea>
-    </body>
     <script type="text/javascript">
-        try {
-            XO.register('read', function(data) {
-                jQuery('textarea').html(data)
-            })
-            XO.register('write', function() {
-                return jQuery('textarea').html()
-            }
-            jQuery('#xostatus').html("Registered XOCom hooks")
-        }
-        catch (err) {
-            jQuery('#xostatus').html("Error registering hooks: " + err)
-        }
+        /*
+         * This example code registers two simple functions
+         * to handle commands from the activity.
+         * 
+         * The data for this page is stored in a textarea, and
+         * we just set or read the data in the textarea
+         */
+        XO.register('read', function(data) {
+            jQuery('textarea').html(data)
+        })
+        XO.register('write', function() {
+            return jQuery('textarea').html()
+        })
     </script>
+    <body>
+        <div id="xo-status">No status</div><br />
+        <textarea rows="30" cols="80">Default text</textarea>
+    </body>
 </html>
 

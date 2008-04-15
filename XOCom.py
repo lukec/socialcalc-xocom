@@ -4,7 +4,8 @@ from xpcom import components
 class XOCom:
     # Constructor gives full XPCom access by default
     # This should be improved for future apps that may not need/want full access
-    def __init__(self):
+    def __init__(self, uri):
+        self.uri = uri
         self.give_full_xpcom_access()
 
     # Give the browser permission to use XPCom interfaces
@@ -19,18 +20,14 @@ class XOCom:
         prefs.getBranch('capability.principal.').setCharPref(
                         'socialcalc.granted', 'UniversalXPConnect')
         prefs.getBranch('capability.principal.').setCharPref(
-                        'socialcalc.id',
-                'file:///home/olpc/src/testapp/web/index.html')
-
+                        'socialcalc.id', self.uri)
 
     # Wrapper method to create a new webview embedded browser component
     # Uses hulahop's WebView.  Assumes that you'll want to serve
     # web/index.html relative to your activity directory.
-    def create_webview(self, uri=None):
+    def create_webview(self):
         web_view = WebView()
-        if not uri:
-            uri = 'file:///home/olpc/src/testapp/web/index.html'
-        web_view.load_uri(uri)
+        web_view.load_uri(self.uri)
         web_view.show()
         return web_view
 
