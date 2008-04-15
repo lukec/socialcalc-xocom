@@ -1,0 +1,7 @@
+[Activity]
+name = OnePageWiki
+service_name = com.socialtext.OnePageWiki
+class = OnePageWikiActivity.OnePageWikiActivity
+icon = activity-onepagewiki
+activity_version = 1
+show_launcher = yes
