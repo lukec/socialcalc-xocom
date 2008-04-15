@@ -2,8 +2,8 @@
     <head>
       <title>XOCom Example</title>
     </head>
-    <script type="text/javascript" src="web/jquery.js"></script>
-    <script type="text/javascript" src="web/xo-code.js"></script>
+    <script type="text/javascript" src="jquery.js"></script>
+    <script type="text/javascript" src="xo-code.js"></script>
     <script type="text/javascript">
         /*
          * This example code registers two simple functions
@@ -18,9 +18,13 @@
         XO.register('write', function() {
             return jQuery('textarea').html()
         })
+        setTimeout( function () {
+            jQuery('#app-status').html("Registered XO Hooks")
+        }, 50)
     </script>
     <body>
-        <div id="xo-status">No status</div><br />
+        XO Status:<div id="xo-status">No status</div><br />
+        App Status:<div id="app-status">No status</div><br />
         <textarea rows="30" cols="80">Default text</textarea>
     </body>
 </html>
