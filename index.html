@@ -4,26 +4,23 @@
     </head>
     <script type="text/javascript" src="web/jquery-1.2.3.js"></script>
     <script type="text/javascript" src="web/xo-code.js"></script>
-    <script type="text/javascript">
-        document.set_msg = function (msg) {
-            jQuery('#bar').html(msg)
-        }
-
-        try {
-            XO.read_hook = function (data) {
-                jQuery('textarea').html(data)
-            }
-            XO.write_hook = function () {
-                return jQuery('textarea').html()
-            }
-        }
-        catch (err) {
-            document.set_msg(err)
-        }
-    </script>
     <body>
-        <div id="status">No status</div><br />
+        <div id="xostatus">No status</div><br />
         <textarea width="600" height="400">Default text</textarea>
     </body>
+    <script type="text/javascript">
+        try {
+            XO.register('read', function(data) {
+                jQuery('textarea').html(data)
+            })
+            XO.register('write', function() {
+                return jQuery('textarea').html()
+            }
+            jQuery('#xostatus').html("Registered XOCom hooks")
+        }
+        catch (err) {
+            jQuery('#xostatus').html("Error registering hooks: " + err)
+        }
+    </script>
 </html>
 
