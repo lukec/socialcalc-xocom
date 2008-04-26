@@ -1,0 +1,3657 @@
+//
+// The main SocialCalc code module of the SocialCalc package
+//
+// (c) Copyright 2008 Socialtext, Inc.
+// All Rights Reserved.
+//
+// The contents of this file are subject to the Artistic License 2.0; you may not
+// use this file except in compliance with the License. You may obtain a copy of 
+// the License at http://socialcalc.org/licenses/al-20/.
+//
+// Some of the other files in the SocialCalc package are licensed under
+// different licenses. Please note the licenses of the modules you use.
+//
+// Code History:
+//
+// Initially coded by Dan Bricklin of Software Garden, Inc., for Socialtext, Inc.
+// Based in part on the SocialCalc 1.1.0 code written in Perl.
+// The SocialCalc 1.1.0 code was:
+//    Portions (c) Copyright 2005, 2006, 2007 Software Garden, Inc.
+//    All Rights Reserved.
+//    Portions (c) Copyright 2007 Socialtext, Inc.
+//    All Rights Reserved.
+// The Perl SocialCalc started as modifications to the wikiCalc(R) program, version 1.0.
+// wikiCalc 1.0 was written by Software Garden, Inc.
+// Unless otherwise specified, referring to "SocialCalc" in comments refers to this
+// JavaScript version of the code, not the SocialCalc Perl code.
+//
+
+/*
+
+**** Overview ****
+
+This is the beginning of a library of routines for displaying and editing spreadsheet
+data in a browser. The HTML that includes this does not need to have anything
+specific to the spreadsheet or editor already present -- everything is dynamically
+added to the DOM by this code, including the rendered sheet and any editing controls.
+
+The library has a few parts. This is the main SocialCalc code module.
+Other parts are the Table Editor module, the Formula module, and the Format Number module.
+Note: The Table Editor module is licensed under a different license than this module.
+
+The class/object style is derived from O'Reilly's JavaScript by Flanagan, 5th Edition,
+section 9.3, page 157.
+
+All of the data, object definitions, functions, etc., are stored as properties of the SocialCalc
+object so as not to clutter up the global variables nor conflict with other names.
+
+A design goal (not tested yet for success) is to make it possible to have more than one
+spreadsheet active on a page, perhaps even open for editing. It is assumed, though, that
+there is only one mouse and one keyboard (a good assumption on most PCs today but not in the
+new "touch and surface world" Apple and Microsoft are working towards).
+
+The testing has been on Windows Firefox (an early version 1 as well as a recent 2.0 version),
+Internet Explorer (6 and 7), Opera (9.23), Mac Safari (2.0.4), and Firefox (2.0.0.6).
+There are small issues with Firefox before 2.0 (cosmetic with drag handles) and larger ones
+with Opera before 9.5 (the Delete key isn't recognized in some cases -- the 9.5 version is still
+in beta and this bug affects other products like GMail, I believe).
+
+The data is stored in a SocialCalc.Sheet object. The data is organized in a form similar to that
+used by SocialCalc 1.1.0. There is a function for converting a normal SocialCalc spreadsheet
+save data string (the spreadsheet part of a SocialCalc data file) into this internal form.
+
+The SocialCalc.RenderContext class provides methods for rendering a table into the DOM representing
+part of the spreadsheet. It is assumed that the spreadsheet could possibly be very large
+and that rendering the whole thing at once could be too time consuming. It is also set up so
+that it might be possible to have some of the sheet data only be loaded on demand (such as by Ajax).
+The rendering can render cells to the right and below the already active area of the spreadsheet
+so that you can scroll to that "clean" area without explicitly doing "add row/column". The class also
+does simple operations such as "scrolling" within that table. The table may optionally include
+row and column headers and may be split into panes. Most of the code assumes any number of panes,
+but only the rightmost pane has scrolling code. In normal operation there would be one or two
+panes horizontally and vertically. The panes may start on any row/column, though a given row/column
+should only appear in one pane at a time (not all code enforces this, yet).
+
+The RenderContext is designed to be rendered as part of a SocialCalc.TableEditor. The TableEditor
+includes the spreadsheet grid as well as scrollbars, pane sliders, and (eventually) editing controls.
+The layout is dynamic and may be recomputed on the fly, such as in response to resizing the browser
+window.
+
+The scrollbars and pane sliders are created using SocialCalc.TableControl objects. These in turn
+make use of Dragging, ToolTip, Button, and MouseWheel functions.
+
+The keyboard input is handled by keyboard code.
+
+There are also some helper routines.
+
+More comments yet to come...
+
+*/
+
+
+var SocialCalc = {}; // This library should be loaded first!
+
+// *************************************
+//
+// Shared values
+//
+// These are "global" values shared by the classes, including default settings
+//
+// *************************************
+
+// Default values
+
+SocialCalc.defaultvalues = {
+   defaultlayout: "padding:2px 2px 1px 2px;vertical-align:top;",
+   defaultfontstyle: "normal normal",
+   defaultfontsize: "small",
+   defaultfontfamily: "Verdana,Arial,Helvetica,sans-serif",
+   defaultcolwidth: "80", // text
+   assumedrowheight: 15, // numeric
+   linkformatstring: "Link", // you could make this an img tag if desired:
+   defaultformatdt: 'd-mmm-yyyy h:mm:ss',
+   defaultformatd: 'd-mmm-yyyy',
+   defaultformatt: '[h]:mm:ss',
+   displaytrue: 'TRUE', // how TRUE shows when rendered
+   displayfalse: 'FALSE',
+
+   textdatadefaulttype: "t", // !!! This sets the default type for text on reading source file
+                             // (tw would be wiki-text, like SocialCalc)
+   expand_markup: function(displayvalue, sheetobj, linkstyle) // the function to expand wiki text - may be replaced
+                   {return SocialCalc.default_expand_markup(displayvalue, sheetobj, linkstyle);}
+
+   }
+
+// Shared flags
+
+   // none at present
+
+
+// *************************************
+//
+// Cell class:
+//
+// *************************************
+
+//
+// Class SocialCalc.Cell
+//
+// Usage: var s = new SocialCalc.Cell(coord);
+//
+SocialCalc.Cell = function(coord) {
+
+   this.coord = coord;
+   this.datavalue = "";
+   this.datatype = null;
+   this.formula = "";
+   this.valuetype = "b";
+
+   }
+
+// The types of cell properties
+//
+// Type 1: Base, Type 2: Attribute, Type 3: Special (e.g., displaystring, parseinfo)
+
+SocialCalc.CellProperties = {
+   coord: 1, datavalue: 1, datatype: 1, formula: 1, valuetype: 1, errors: 1, comment: 1,
+   bt: 2, br: 2, bb: 2, bl: 2, layout: 2, font: 2, color: 2, bgcolor: 2,
+   cellformat: 2, nontextvalueformat: 2, textvalueformat: 2, colspan: 2, rowspan: 2,
+   cssc: 2, csss: 2, mod: 2,
+   displaystring: 3, parseinfo: 3
+   };
+
+SocialCalc.CellPropertiesTable = {
+   bt: "borderstyle", br: "borderstyle", bb: "borderstyle", bl: "borderstyle",
+   layout: "layout", font: "font", color: "color", bgcolor: "color",
+   cellformat: "cellformat", nontextvalueformat: "valueformat", textvalueformat: "valueformat"
+   };
+
+// *************************************
+//
+// Sheet class:
+//
+// *************************************
+
+//
+// Class SocialCalc.Sheet
+//
+// Usage: var s = new SocialCalc.Sheet();
+//
+
+SocialCalc.Sheet = function() {
+
+   SocialCalc.ResetSheet(this);
+
+   }
+
+SocialCalc.ResetSheet = function(sheet) {
+
+   var name;
+
+   for (name in sheet) { // make sure empty
+      delete sheet[name];
+      }
+
+   // properties:
+
+   sheet.cells = {}; // at least one for each non-blank cell: coord: cell-object
+   sheet.attribs = // sheet attributes
+      {
+         lastcol: 1,
+         lastrow: 1,
+         defaultlayout: 0
+      };
+   sheet.rowattribs =
+      {
+         hide: {}, // access by row number
+         height: {}
+      };
+   sheet.colattribs =
+      {
+         width: {}, // access by col name
+         hide: {}
+      };
+   sheet.names={}; // Each is: {desc: "optional description", definition: "B5, A1:B7, or =formula"}
+   sheet.layouts=[];
+   sheet.layouthash={};
+   sheet.fonts=[];
+   sheet.fonthash={};
+   sheet.colors=[];
+   sheet.colorhash={};
+   sheet.borderstyles=[];
+   sheet.borderstylehash={};
+   sheet.cellformats=[];
+   sheet.cellformathash={};
+   sheet.valueformats=[];
+   sheet.valueformathash={};
+
+   sheet.copiedfrom = ""; // if a range, then this was loaded from a saved range as clipboard content
+
+   sheet.changes = new SocialCalc.UndoStack();
+
+   }
+
+// Methods:
+
+SocialCalc.Sheet.prototype.ResetSheet = function() {SocialCalc.ResetSheet(this);};
+SocialCalc.Sheet.prototype.AddCell = function(newcell) {return this.cells[newcell.coord]=newcell;};
+SocialCalc.Sheet.prototype.GetAssuredCell = function(coord) {
+   return this.cells[coord] || this.AddCell(new SocialCalc.Cell(coord));
+   };
+SocialCalc.Sheet.prototype.ParseSheetSave = function(savedsheet) {SocialCalc.ParseSheetSave(savedsheet,this);};
+SocialCalc.Sheet.prototype.CellFromStringParts = function(cell, parts, j) {return SocialCalc.CellFromStringParts(this, cell, parts, j);};
+SocialCalc.Sheet.prototype.CreateSheetSave = function(range) {return SocialCalc.CreateSheetSave(this, range);};
+SocialCalc.Sheet.prototype.CellToString = function(cell) {return SocialCalc.CellToString(this, cell);};
+SocialCalc.Sheet.prototype.ExecuteSheetCommand = function(cmd, saveundo) {return SocialCalc.ExecuteSheetCommand(this, cmd, saveundo);};
+SocialCalc.Sheet.prototype.SheetUndo = function() {return SocialCalc.SheetUndo(this);};
+SocialCalc.Sheet.prototype.SheetRedo = function() {return SocialCalc.SheetRedo(this);};
+SocialCalc.Sheet.prototype.CreateAuditString = function() {return SocialCalc.CreateAuditString(this);};
+SocialCalc.Sheet.prototype.GetStyleNum = function(atype, style) {return SocialCalc.GetStyleNum(this, atype, style);};
+SocialCalc.Sheet.prototype.GetStyleString = function(atype, num) {return SocialCalc.GetStyleString(this, atype, num);};
+SocialCalc.Sheet.prototype.RecalcSheet = function() {return SocialCalc.RecalcSheet(this);};
+SocialCalc.Sheet.prototype.CheckAndCalcCell = function(coord) {return SocialCalc.CheckAndCalcCell(this, coord);};
+
+//
+// Sheet save format:
+//
+// linetype:param1:param2:...
+//
+// Linetypes are:
+//
+//    version:versionname - version of this format. Currently 1.4.
+//
+//    cell:coord:type:value...:type:value... - Types are as follows:
+//
+//       v:value - straight numeric value
+//       t:value - straight text/wiki-text in cell, encoded to handle \, :, newlines
+//       vt:fulltype:value - value with value type/subtype
+//       vtf:fulltype:value:formulatext - formula resulting in value with value type/subtype, value and text encoded
+//       vtc:fulltype:value:valuetext - formatted text constant resulting in value with value type/subtype, value and text encoded
+//       vf:fvalue:formulatext - formula resulting in value, value and text encoded (obsolete: only pre format version 1.1)
+//          fvalue - first char is "N" for numeric value, "T" for text value, "H" for HTML value, rest is the value
+//       e:errortext - Error text. Non-blank means formula parsing/calculation results in error.
+//       b:topborder#:rightborder#:bottomborder#:leftborder# - border# in sheet border list or blank if none
+//       l:layout# - number in cell layout list
+//       f:font# - number in sheet fonts list
+//       c:color# - sheet color list index for text
+//       bg:color# - sheet color list index for background color
+//       cf:format# - sheet cell format number for explicit format (align:left, etc.)
+//       cvf:valueformat# - sheet cell value format number (obsolete: only pre format v1.2)
+//       tvf:valueformat# - sheet cell text value format number
+//       ntvf:valueformat# - sheet cell non-text value format number
+//       colspan:numcols - number of columns spanned in merged cell
+//       rowspan:numrows - number of rows spanned in merged cell
+//       cssc:classname - name of CSS class to be used for cell when published instead of one calculated here
+//       csss:styletext - explicit CSS style information, encoded to handle :, etc.
+//       mod:allow - if "y" allow modification of cell for live "view" recalc
+//       comment:value - encoded text of comment for this cell (added in v1.5)
+//
+//    col:
+//       w:widthval - number, "auto" (no width in <col> tag), number%, or blank (use default)
+//       hide: - yes/no, no is assumed if missing
+//    row:
+//       hide - yes/no, no is assumed if missing
+//
+//    sheet:
+//       c:lastcol - number
+//       r:lastrow - number
+//       w:defaultcolwidth - number, "auto", number%, or blank (default->80)
+//       h:defaultrowheight - not used
+//       tf:format# - cell format number for sheet default for text values
+//       ntf:format# - cell format number for sheet default for non-text values (i.e., numbers)
+//       layout:layout# - default cell layout number in cell layout list
+//       font:font# - default font number in sheet font list
+//       vf:valueformat# - default number value format number in sheet valueformat list (obsolete: only pre format version 1.2)
+//       ntvf:valueformat# - default non-text (number) value format number in sheet valueformat list
+//       tvf:valueformat# - default text value format number in sheet valueformat list
+//       color:color# - default number for text color in sheet color list
+//       bgcolor:color# - default number for background color in sheet color list
+//       circularreferencecell:coord - cell coord with a circular reference
+//       recalc:value - on/off (on is default). If "on", appropriate changes to the sheet cause a recalc
+//       needsrecalc:value - yes/no (no is default). If "yes", formula values are not up to date
+//
+//    name:name:description:value - name definition, name in uppercase, with value being "B5", "A1:B7", or "=formula"
+//    font:fontnum:value - text of font definition (style weight size family) for font fontnum
+//                         "*" for "style weight", size, or family, means use default (first look to sheet, then builtin)
+//    color:colornum:rgbvalue - text of color definition (e.g., rgb(255,255,255)) for color colornum
+//    border:bordernum:value - text of border definition (thickness style color) for border bordernum
+//    layout:layoutnum:value - text of vertical alignment and padding style for cell layout layoutnum:
+//                             vertical-alignment:vavalue;padding topval rightval bottomval leftval;
+//    cellformat:cformatnum:value - text of cell alignment (left/center/right) for cellformat cformatnum
+//    valueformat:vformatnum:value - text of number format (see FormatValueForDisplay) for valueformat vformatnum (changed in v1.2)
+//    clipboardrange:upperleftcoord:bottomrightcoord - ignored -- from wikiCalc
+//    clipboard:coord:type:value:... - ignored -- from wikiCalc
+//
+// If this is clipboard contents, then there is also information to facilitate pasting:
+//
+//    copiedfrom:upperleftcoord:bottomrightcoord - range from which this was copied
+//
+
+// Functions:
+
+SocialCalc.ParseSheetSave = function(savedsheet,sheetobj) {
+
+   var lines=savedsheet.split(/\r\n|\n/);
+   var parts=[];
+   var line;
+   var i, j, t, v, coord, cell, attribs, name;
+   for (i=0;i<lines.length;i++) {
+      line=lines[i];
+      parts = line.split(":");
+      switch (parts[0]) {
+         case "cell":
+            cell=sheetobj.GetAssuredCell(parts[1]);
+            j=2;
+            sheetobj.CellFromStringParts(cell, parts, j);
+            break;
+
+         case "col":
+            coord=parts[1];
+            j=2;
+            while (t=parts[j++]) {
+               switch (t) {
+                  case "w":
+                     sheetobj.colattribs.width[coord]=parts[j++]; // must be text - could be auto or %, etc.
+                     break;
+                  case "hide":
+                     sheetobj.colattribs.hide[coord]=parts[j++];
+                     break;
+                  default:
+                     throw "Unknown col type item '"+t+"'";
+                     break;
+                  }
+               }
+            break;
+
+         case "row":
+            coord=parts[1]-0;
+            j=2;
+            while (t=parts[j++]) {
+               switch (t) {
+                  case "h":
+                     sheetobj.rowattribs.height[coord]=parts[j++]-0;
+                     break;
+                  case "hide":
+                     sheetobj.rowlattribs.hide[coord]=parts[j++];
+                     break;
+                  default:
+                     throw "Unknown row type item '"+t+"'";
+                     break;
+                  }
+               }
+            break;
+
+         case "sheet":
+            attribs=sheetobj.attribs;
+            j=1;
+            while (t=parts[j++]) {
+               switch (t) {
+                  case "c":
+                     attribs.lastcol=parts[j++]-0;
+                     break;
+                  case "r":
+                     attribs.lastrow=parts[j++]-0;
+                     break;
+                  case "w":
+                     attribs.defaultcolwidth=parts[j++]-0;
+                     break;
+                  case "h":
+                     attribs.defaultrowheight=parts[j++]-0;
+                     break;
+                  case "tf":
+                     attribs.defaulttextformat=parts[j++]-0;
+                     break;
+                  case "ntf":
+                     attribs.defaultnontextformat=parts[j++]-0;
+                     break;
+                  case "layout":
+                     attribs.defaultlayout=parts[j++]-0;
+                     break;
+                  case "font":
+                     attribs.defaultfont=parts[j++]-0;
+                     break;
+                  case "tvf":
+                     attribs.defaulttextvalueformat=parts[j++]-0;
+                     break;
+                  case "ntvf":
+                     attribs.defaultnontextvalueformat=parts[j++]-0;
+                     break;
+                  case "color":
+                     attribs.defaultcolor=parts[j++]-0;
+                     break;
+                  case "bgcolor":
+                     attribs.defaultbgcolor=parts[j++]-0;
+                     break;
+                  case "circularreferencecell":
+                     attribs.circularreferencecell=parts[j++];
+                     break;
+                  case "recalc":
+                     attribs.recalc=parts[j++];
+                     break;
+                  case "needsrecalc":
+                     attribs.needsrecalc=parts[j++];
+                     break;
+                  default:
+                     j+=1;
+                     break;
+                  }
+               }
+            break;
+
+         case "name":
+            name = SocialCalc.decodeFromSave(parts[1]).toUpperCase();
+            sheetobj.names[name] = {desc: SocialCalc.decodeFromSave(parts[2])};
+            sheetobj.names[name].definition = SocialCalc.decodeFromSave(parts[3]);
+            break;
+
+         case "layout":
+            parts=lines[i].match(/^layout\:(\d+)\:(.+)$/); // layouts can have ":" in them
+            sheetobj.layouts[parts[1]-0]=parts[2];
+            sheetobj.layouthash[parts[2]]=parts[1]-0;
+            break;
+
+         case "font":
+            sheetobj.fonts[parts[1]-0]=parts[2];
+            sheetobj.fonthash[parts[2]]=parts[1]-0;
+            break;
+
+         case "color":
+            sheetobj.colors[parts[1]-0]=parts[2];
+            sheetobj.colorhash[parts[2]]=parts[1]-0;
+            break;
+
+         case "border":
+            sheetobj.borderstyles[parts[1]-0]=parts[2];
+            sheetobj.borderstylehash[parts[2]]=parts[1]-0;
+            break;
+
+         case "cellformat":
+            sheetobj.cellformats[parts[1]-0]=parts[2];
+            sheetobj.cellformathash[parts[2]]=parts[1]-0;
+            break;
+
+         case "valueformat":
+            v=SocialCalc.decodeFromSave(parts[2]);
+            sheetobj.valueformats[parts[1]-0]=v;
+            sheetobj.valueformathash[v]=parts[1]-0;
+            break;
+
+         case "version":
+            break;
+
+         case "copiedfrom":
+            sheetobj.copiedfrom = parts[1]+":"+parts[2];
+            break;
+
+         case "clipboardrange": // in save versions up to 1.3. Ignored.
+         case "clipboard":
+            break;
+
+         case "":
+            break;
+
+         default:
+            throw "Unknown line type '"+parts[0]+"'";
+            break;
+         }
+      parts = null;
+      }
+   }
+
+//
+// SocialCalc.CellFromStringParts(sheet, cell, parts, j)
+//
+// Takes string that has been split by ":" in parts, starting at item j,
+// and fills in cell assuming save format.
+//
+
+SocialCalc.CellFromStringParts = function(sheet, cell, parts, j) {
+
+   var cell, t, v;
+
+   while (t=parts[j++]) {
+      switch (t) {
+         case "v":
+            cell.datavalue=SocialCalc.decodeFromSave(parts[j++])-0;
+            cell.datatype="v";
+            cell.valuetype="n";
+            break;
+         case "t":
+            cell.datavalue=SocialCalc.decodeFromSave(parts[j++]);
+            cell.datatype="t";
+            cell.valuetype=SocialCalc.defaultvalues.textdatadefaulttype; 
+            break;
+         case "vt":
+            v=parts[j++];
+            cell.valuetype=v;
+            cell.datatype=v.charAt(0)=="n" ? "v" : "t";
+            cell.datavalue=SocialCalc.decodeFromSave(parts[j++]);
+            break;
+         case "vtf":
+            cell.valuetype=parts[j++];
+            cell.datavalue=SocialCalc.decodeFromSave(parts[j++]);
+            cell.formula=SocialCalc.decodeFromSave(parts[j++]);
+            cell.datatype="f";
+            break;
+         case "vtc":
+            cell.valuetype=parts[j++];
+            cell.datavalue=SocialCalc.decodeFromSave(parts[j++]);
+            cell.formula=SocialCalc.decodeFromSave(parts[j++]);
+            cell.datatype="c";
+            break;
+         case "e":
+            cell.errors=SocialCalc.decodeFromSave(parts[j++]);
+            break;
+         case "b":
+            cell.bt=parts[j++]-0;
+            cell.br=parts[j++]-0;
+            cell.bb=parts[j++]-0;
+            cell.bl=parts[j++]-0;
+            break;
+         case "l":
+            cell.layout=parts[j++]-0;
+            break;
+         case "f":
+            cell.font=parts[j++]-0;
+            break;
+         case "c":
+            cell.color=parts[j++]-0;
+            break;
+         case "bg":
+            cell.bgcolor=parts[j++]-0;
+            break;
+         case "cf":
+            cell.cellformat=parts[j++]-0;
+            break;
+         case "ntvf":
+            cell.nontextvalueformat=parts[j++]-0;
+            break;
+         case "tvf":
+            cell.textvalueformat=parts[j++]-0;
+            break;
+         case "colspan":
+            cell.colspan=parts[j++]-0;
+            break;
+         case "rowspan":
+            cell.rowspan=parts[j++]-0;
+            break;
+         case "cssc":
+            cell.cssc=parts[j++];
+            break;
+         case "csss":
+            cell.csss=SocialCalc.decodeFromSave(parts[j++]);
+            break;
+         case "mod":
+            j+=1;
+            break;
+         case "comment":
+            cell.comment=SocialCalc.decodeFromSave(parts[j++]);
+            break;
+         default:
+            throw "Unknown cell type item '"+t+"'";
+            break;
+         }
+      }
+
+   }
+
+
+SocialCalc.sheetfields = ["lastcol", "lastrow", "defaultcolwidth", "defaultrowheight",
+                   "defaulttextformat", "defaultnontextformat", "defaulttextvalueformat", "defaultnontextvalueformat",
+                   "defaultlayout", "defaultfont", "defaultcolor", "defaultbgcolor",
+                   "circularreferencecell", "recalc", "needsrecalc"];
+SocialCalc.sheetfieldsshort = ["c", "r", "w", "h",
+                   "tf", "ntf", "tvf", "ntvf",
+                   "layout", "font", "color", "bgcolor",
+                   "circularreferencecell", "recalc", "needsrecalc"];
+
+//
+// sheetstr = SocialCalc.CreateSheetSave(sheetobj, range)
+//
+// Creates a text representation of the sheetobj data.
+// If the range is present then only those cells are saved
+// (as clipboard data with "copiedfrom" set).
+//
+
+SocialCalc.CreateSheetSave = function(sheetobj, range) {
+
+   var cell, cr1, cr2, row, col, coord, attrib, line, value, formula, i, t, r, b, l, name, blanklen;
+   var result=[];
+
+   var prange;
+   if (range) {
+      prange = SocialCalc.ParseRange(range);
+      }
+   else {
+      prange = {cr1: {row: 1, col:1},
+                cr2: {row: sheetobj.attribs.lastrow, col: sheetobj.attribs.lastcol}};
+      }
+   cr1 = prange.cr1;
+   cr2 = prange.cr2;
+
+   result.push("version:1.5");
+
+   for (row=cr1.row; row <= cr2.row; row++) {
+      for (col=cr1.col; col <= cr2.col; col++) {
+         coord = SocialCalc.crToCoord(col, row);
+         cell=sheetobj.cells[coord];
+         if (!cell) continue;
+         line=sheetobj.CellToString(cell);
+         if (line.length==0) continue; // ignore completely empty cells
+         line="cell:"+coord+line;
+         result.push(line);
+         }
+      }
+
+   for (col=1; col <= sheetobj.attribs.lastcol; col++) {
+      coord = SocialCalc.rcColname(col);
+      if (sheetobj.colattribs.width[coord])
+         result.push("col:"+coord+":w:"+sheetobj.colattribs.width[coord]);
+      if (sheetobj.colattribs.hide[coord])
+         result.push("col:"+coord+":hide:"+sheetobj.colattribs.hide[coord]);
+      }
+
+   for (row=1; row <= sheetobj.attribs.lastrow; row++) {
+      if (sheetobj.rowattribs.height[row])
+         result.push("row:"+row+":h:"+sheetobj.rowattribs.height[row]);
+      if (sheetobj.rowattribs.hide[row])
+         result.push("row:"+row+":hide:"+sheetobj.rowattribs.hide[row]);
+      }
+
+   line="sheet";
+   for (i=0; i<SocialCalc.sheetfields.length; i++) {
+      value = SocialCalc.encodeForSave(sheetobj.attribs[SocialCalc.sheetfields[i]]);
+      if (value) line+=":"+SocialCalc.sheetfieldsshort[i]+":"+value;
+      }
+   result.push(line);
+
+   for (name in sheetobj.names) {
+      result.push("name:"+SocialCalc.encodeForSave(name).toUpperCase()+":"+
+                   SocialCalc.encodeForSave(sheetobj.names[name].desc)+":"+
+                   SocialCalc.encodeForSave(sheetobj.names[name].definition));
+      }
+
+   for (i=1;i<sheetobj.layouts.length;i++) {
+      result.push("layout:"+i+":"+sheetobj.layouts[i]);
+      }
+
+   for (i=1;i<sheetobj.fonts.length;i++) {
+      result.push("font:"+i+":"+sheetobj.fonts[i]);
+      }
+
+   for (i=1;i<sheetobj.colors.length;i++) {
+      result.push("color:"+i+":"+sheetobj.colors[i]);
+      }
+
+   for (i=1;i<sheetobj.borderstyles.length;i++) {
+      result.push("border:"+i+":"+sheetobj.borderstyles[i]);
+      }
+
+   for (i=1;i<sheetobj.cellformats.length;i++) {
+      result.push("cellformat:"+i+":"+SocialCalc.encodeForSave(sheetobj.cellformats[i]));
+      }
+
+   for (i=1;i<sheetobj.valueformats.length;i++) {
+      result.push("valueformat:"+i+":"+SocialCalc.encodeForSave(sheetobj.valueformats[i]));
+      }
+
+   if (range) {
+      result.push("copiedfrom:"+SocialCalc.crToCoord(cr1.col, cr1.row)+":"+
+                  SocialCalc.crToCoord(cr2.col, cr2.row));
+      }
+
+   result.push(""); // one extra to get extra \n
+
+   return result.join("\n");
+   }
+
+//
+// line = SocialCalc.CellToString(sheet, cell)
+//
+
+SocialCalc.CellToString = function(sheet, cell) {
+
+   var cell, line, value, formula, t, r, b, l;
+
+   line = "";
+
+   if (!cell) return line;
+
+   value = SocialCalc.encodeForSave(cell.datavalue);
+   if (cell.datatype=="v") {
+      if (cell.valuetype=="n") line += ":v:"+value;
+      else line += ":vt:"+cell.valuetype+":"+value;
+      }
+   else if (cell.datatype=="t") {
+      if (cell.valuetype==SocialCalc.defaultvalues.textdatadefaulttype)
+         line += ":t:"+value;
+      else line += ":vt:"+cell.valuetype+":"+value;
+      }
+   else {
+      formula = SocialCalc.encodeForSave(cell.formula);
+      if (cell.datatype=="f") {
+         line += ":vtf:"+cell.valuetype+":"+value+":"+formula;
+         }
+      else if (cell.datatype=="c") {
+         line += ":vtc:"+cell.valuetype+":"+value+":"+formula;
+         }
+      }
+   if (cell.errors) {
+      line += ":e:"+SocialCalc.encodeForSave(cell.errors);
+      }
+   t = cell.bt || "";
+   r = cell.br || "";
+   b = cell.bb || "";
+   l = cell.bl || "";
+   if (t || r || b || l)
+      line += ":b:"+t+":"+r+":"+b+":"+l;
+   if (cell.layout) line += ":l:"+cell.layout;
+   if (cell.font) line += ":f:"+cell.font;
+   if (cell.color) line += ":c:"+cell.color;
+   if (cell.bgcolor) line += ":bg:"+cell.bgcolor;
+   if (cell.cellformat) line += ":cf:"+cell.cellformat;
+   if (cell.textvalueformat) line += ":tvf:"+cell.textvalueformat;
+   if (cell.nontextvalueformat) line += ":ntvf:"+cell.nontextvalueformat;
+   if (cell.colspan) line += ":colspan:"+cell.colspan;
+   if (cell.rowspan) line += ":rowspan:"+cell.rowspan;
+   if (cell.cssc) line += ":cssc:"+cell.cssc;
+   if (cell.csss) line += ":csss:"+SocialCalc.encodeForSave(cell.csss);
+   if (cell.mod) line += ":mod:"+cell.mod;
+   if (cell.comment) line += ":comment:"+SocialCalc.encodeForSave(cell.comment);
+
+   return line;
+
+   }
+
+//
+// errortext = SocialCalc.ExecuteSheetCommand(sheet, cmd)
+//
+//
+// Executes commands that modify the sheet data. Sets sheet "needsrecalc" as needed.
+//
+// The cmd string may be multiple commands, separated by newlines. In that case
+// only one "step" is put on the undo stack representing all the commands.
+// Note that because of this, in "set A1 text ..." and "set A1 comment ..." text is
+// treated as encoded (newline => \n, \ => \b, : => \c).
+//
+// The commands are in the forms:
+//
+//    set sheet attributename value (plus lastcol and lastrow)
+//    set 22 attributename value
+//    set B attributename value
+//    set A1 attributename value1 value2... (see each attribute in code for details)
+//    set A1:B5 attributename value1 value2...
+//    erase/copy/cut/paste/fillright/filldown A1:B5 all/formulas/format
+//    loadclipboard save-encoded-clipboard-data
+//    clearclipboard
+//    merge C3:F3
+//    unmerge C3
+//    insertcol/insertrow C5
+//    deletecol/deleterow C5:E7
+//    name define NAME definition
+//    name desc NAME description
+//    name delete NAME
+//
+
+SocialCalc.ExecuteSheetCommand = function(sheet, cmdstr, saveundo) {
+
+   var cmd, cmd1, rest, what, attrib, num, pos, pos2, errortext, undostart, val;
+   var cr1, cr2, col, row, cr, cell, newcell;
+   var fillright, rowstart, colstart, crbase, rowoffset, coloffset, basecell;
+   var clipsheet, cliprange, numcols, numrows, attribtable;
+   var colend, rowend, newcolstart, newrowstart, newcolend, newrowend, rownext, colnext, colthis, cellnext;
+   var lastrow, lastcol, rowbefore, colbefore, oldformula, oldcr;
+   var cols, dirs, lastsortcol, i, sortlist, sortcells, sortvalues, sorttypes;
+   var sortfunction, slen, valtype, originalrow, sortedcr;
+   var name, v1, v2;
+
+   var attribs = sheet.attribs;
+   var changes = sheet.changes;
+   var cellProperties = SocialCalc.CellProperties;
+
+   var ParseRange =
+      function() {
+         var prange = SocialCalc.ParseRange(what);
+         cr1 = prange.cr1;
+         cr2 = prange.cr2;
+         if (cr2.col > attribs.lastcol) attribs.lastcol = cr2.col;
+         if (cr2.row > attribs.lastrow) attribs.lastrow = cr2.row;
+         };
+
+   cmd = new SocialCalc.Parse(cmdstr);
+   errortext = "";
+
+   if (saveundo) {
+      sheet.changes.PushChange("");
+      }
+
+   while (!cmd.EOF()) {
+
+//!! NEED TO INDENT!!!!
+
+   if (saveundo) {
+      sheet.changes.AddDo(cmd.RestOfStringNoMove());
+      }
+
+   cmd1 = cmd.NextToken();
+
+   switch (cmd1) {
+
+      case "set":
+         what = cmd.NextToken();
+         attrib = cmd.NextToken();
+         rest = cmd.RestOfString();
+         undostart = "set "+what+" "+attrib;
+
+         if (what=="sheet") {
+            switch (attrib) {
+               case "defaultcolwidth":
+                  if (saveundo) changes.AddUndo(undostart, attribs[attrib]);
+                  attribs[attrib] = rest;
+                  break;
+               case "defaultcolor":
+               case "defaultbgcolor":
+                  if (saveundo) changes.AddUndo(undostart, sheet.GetStyleString("color", attribs[attrib]));
+                  attribs[attrib] = sheet.GetStyleNum("color", rest);
+                  break;
+               case "defaultlayout":
+                  if (saveundo) changes.AddUndo(undostart, sheet.GetStyleString("layout", attribs[attrib]));
+                  attribs[attrib] = sheet.GetStyleNum("layout", rest);
+                  break;
+               case "defaultfont":
+                  if (saveundo) changes.AddUndo(undostart, sheet.GetStyleString("font", attribs[attrib]));
+                  if (rest=="* * *") rest = ""; // all default
+                  attribs[attrib] = sheet.GetStyleNum("font", rest);
+                  break;
+               case "defaulttextformat":
+               case "defaultnontextformat":
+                  if (saveundo) changes.AddUndo(undostart, sheet.GetStyleString("cellformat", attribs[attrib]));
+                  attribs[attrib] = sheet.GetStyleNum("cellformat", rest);
+                  break;
+               case "defaulttextvalueformat":
+               case "defaultnontextvalueformat":
+                  if (saveundo) changes.AddUndo(undostart, sheet.GetStyleString("valueformat", attribs[attrib]));
+                  attribs[attrib] = sheet.GetStyleNum("valueformat", rest);
+                  for (cr in sheet.cells) { // forget all cached display strings
+                     delete sheet.cells[cr].displaystring;
+                     }
+                  break;
+               case "lastcol":
+               case "lastrow":
+                  if (saveundo) changes.AddUndo(undostart, attribs[attrib]-0);
+                  num = rest-0;
+                  if (typeof num == "number") attribs[attrib] = num > 0 ? num : 1;
+                  break;
+               default:
+                  errortext = "Unknown sheet command: "+cmdstr;
+                  break;
+               }
+            }
+
+         else if (/(^[A-Z])([A-Z])?(:[A-Z][A-Z]?){0,1}$/i.test(what)) { // col attributes
+            what = what.toUpperCase();
+            pos = what.indexOf(":");
+            if (pos>=0) {
+               cr1 = SocialCalc.coordToCr(what.substring(0,pos)+"1");
+               cr2 = SocialCalc.coordToCr(what.substring(pos+1)+"1");
+               }
+            else {
+               cr1 = SocialCalc.coordToCr(what+"1");
+               cr2 = cr1;
+               }
+            for (col=cr1.col; col <= cr2.col; col++) {
+               if (attrib=="width") {
+                  cr = SocialCalc.rcColname(col);
+                  if (saveundo) changes.AddUndo("set "+cr+" width", sheet.colattribs.width[cr]);
+                  if (rest.length > 0 ) {
+                     sheet.colattribs.width[cr] = rest;
+                     }
+                  else {
+                     delete sheet.colattribs.width[cr];
+                     }
+                  }
+               }
+            }
+
+         // !!!!! need row attribs !!!!
+
+         else if (/([a-z]){0,1}(\d+)/i.test(what)) { // cell attributes
+            ParseRange();
+            for (row=cr1.row; row <= cr2.row; row++) {
+               for (col=cr1.col; col <= cr2.col; col++) {
+                  cr = SocialCalc.crToCoord(col, row);
+                  cell=sheet.GetAssuredCell(cr);
+                  if (saveundo) changes.AddUndo("set "+cr+" all", sheet.CellToString(cell));
+                  if (attrib=="value") { // set coord value type numeric-value
+                     pos = rest.indexOf(" ");
+                     cell.datavalue = rest.substring(pos+1)-0;
+                     delete cell.errors;
+                     cell.datatype = "v";
+                     cell.valuetype = rest.substring(0,pos);
+                     delete cell.displaystring;
+                     delete cell.parseinfo;
+                     attribs.needsrecalc = "yes";
+                     }
+                  else if (attrib=="text") { // set coord text type text-value
+                     pos = rest.indexOf(" ");
+                     cell.datavalue = SocialCalc.decodeFromSave(rest.substring(pos+1));
+                     delete cell.errors;
+                     cell.datatype = "t";
+                     cell.valuetype = rest.substring(0,pos);
+                     delete cell.displaystring;
+                     delete cell.parseinfo;
+                     attribs.needsrecalc = "yes";
+                     }
+                  else if (attrib=="formula") { // set coord formula formula-body-less-initial-=
+                     cell.datavalue = 0; // until recalc
+                     delete cell.errors;
+                     cell.datatype = "f";
+                     cell.valuetype = "e#N/A"; // until recalc
+                     cell.formula = rest;
+                     delete cell.displaystring;
+                     delete cell.parseinfo;
+                     attribs.needsrecalc = "yes";
+                     }
+                  else if (attrib=="constant") { // set coord constant type numeric-value source-text
+                     pos = rest.indexOf(" ");
+                     pos2 = rest.substring(pos+1).indexOf(" ");
+                     cell.datavalue = rest.substring(pos+1,pos+1+pos2)-0;
+                     cell.valuetype = rest.substring(0,pos);
+                     if (cell.valuetype.charAt(0)=="e") { // error
+                        cell.errors = cell.valuetype.substring(1);
+                        }
+                     else {
+                        delete cell.errors;
+                        }
+                     cell.datatype = "c";
+                     cell.formula = rest.substring(pos+pos2+2);
+                     delete cell.displaystring;
+                     delete cell.parseinfo;
+                     attribs.needsrecalc = "yes";
+                     }
+                  else if (attrib=="empty") { // erase value
+                     cell.datavalue = "";
+                     delete cell.errors;
+                     cell.datatype = null;
+                     cell.formula = "";
+                     cell.valuetype = "b";
+                     delete cell.displaystring;
+                     delete cell.parseinfo;
+                     attribs.needsrecalc = "yes";
+                     }
+                  else if (attrib=="all") { // set coord all :this:val1:that:val2...
+                     if (rest.length>0) {
+                        cell = new SocialCalc.Cell(cr);
+                        sheet.CellFromStringParts(cell, rest.split(":"), 1);
+                        sheet.cells[cr] = cell;
+                        }
+                     else {
+                        delete sheet.cells[cr];
+                        }
+                     attribs.needsrecalc = "yes";
+                     }
+                  else if (/^b[trbl]$/.test(attrib)) { // set coord bt 1px solid black
+                     cell[attrib] = sheet.GetStyleNum("borderstyle", rest);
+                     }
+                  else if (attrib=="color" || attrib=="bgcolor") {
+                     cell[attrib] = sheet.GetStyleNum("color", rest);
+                     }
+                  else if (attrib=="layout" || attrib=="cellformat") {
+                     cell[attrib] = sheet.GetStyleNum(attrib, rest);
+                     }
+                  else if (attrib=="font") { // set coord font style weight size family
+                     if (rest=="* * *") rest = "";
+                     cell[attrib] = sheet.GetStyleNum("font", rest);
+                     }
+                  else if (attrib=="textvalueformat" || attrib=="nontextvalueformat") {
+                     cell[attrib] = sheet.GetStyleNum("valueformat", rest);
+                     delete cell.displaystring;
+                     }
+                  else if (attrib=="cssc") {
+                     rest = rest.replace(/[^a-zA-Z0-9\-]/g, "");
+                     cell.cssc = rest;
+                     }
+                  else if (attrib=="csss") {
+                     rest = rest.replace(/\n/g, "");
+                     cell.csss = rest;
+                     }
+                  else if (attrib=="mod") {
+                     rest = rest.replace(/[^yY]/g, "").toLowerCase();
+                     cell.csss = rest;
+                     }
+                  else if (attrib=="comment") {
+                     cell.comment = SocialCalc.decodeFromSave(rest);
+                     }
+                  else {
+                     errortext = "Unknown set coord command: "+cmdstr;
+                     }
+                  }
+               }
+
+            }
+         break;
+
+      case "merge":
+         what = cmd.NextToken();
+         rest = cmd.RestOfString();
+         ParseRange();
+         cell=sheet.GetAssuredCell(cr1.coord);
+         if (saveundo) changes.AddUndo("unmerge "+cr1.coord);
+
+         if (cr2.col > cr1.col) cell.colspan = cr2.col - cr1.col + 1;
+         else delete cell.colspan;
+         if (cr2.row > cr1.row) cell.rowspan = cr2.row - cr1.row + 1;
+         else delete cell.rowspan;
+
+         break;
+
+      case "unmerge":
+         what = cmd.NextToken();
+         rest = cmd.RestOfString();
+         ParseRange();
+         cell=sheet.GetAssuredCell(cr1.coord);
+         if (saveundo) changes.AddUndo("merge "+cr1.coord+":"+SocialCalc.crToCoord(cr1.col+(cell.colspan||1)-1, cr1.row+(cell.rowspan||1)-1));
+
+         delete cell.colspan;
+         delete cell.rowspan;
+
+         break;
+
+      case "erase":
+      case "cut":
+         what = cmd.NextToken();
+         rest = cmd.RestOfString();
+         ParseRange();
+
+         if (cmd1=="cut") { // save copy of whole thing before erasing
+            if (saveundo) changes.AddUndo("loadclipboard", SocialCalc.encodeForSave(SocialCalc.Clipboard.clipboard));
+            SocialCalc.Clipboard.clipboard = SocialCalc.CreateSheetSave(sheet, what);
+            }
+
+         for (row = cr1.row; row <= cr2.row; row++) {
+            for (col = cr1.col; col <= cr2.col; col++) {
+               cr = SocialCalc.crToCoord(col, row);
+               cell=sheet.GetAssuredCell(cr);
+               if (saveundo) changes.AddUndo("set "+cr+" all", sheet.CellToString(cell));
+               if (rest=="all") {
+                  delete sheet.cells[cr];
+                  }
+               else if (rest == "formulas") {
+                  cell.datavalue = "";
+                  cell.datatype = null;
+                  cell.formula = "";
+                  cell.valuetype = "b";
+                  delete cell.errors;
+                  delete cell.displaystring;
+                  delete cell.parseinfo;
+                  if (cell.comment) { // comments are considered content for erasing
+                     delete cell.comment;
+                     }
+                  }
+               else if (rest == "formats") {
+                  newcell = new SocialCalc.Cell(cr); // create a new cell without attributes
+                  newcell.datavalue = cell.datavalue; // copy existing values
+                  newcell.datatype = cell.datatype;
+                  newcell.formula = cell.formula;
+                  newcell.valuetype = cell.valuetype;
+                  if (cell.comment) {
+                     newcell.comment = cell.comment;
+                     }
+                  sheet.cells[cr] = newcell; // replace
+                  }
+               }
+            }
+         attribs.needsrecalc = "yes";
+         break;
+
+      case "fillright":
+      case "filldown":
+         what = cmd.NextToken();
+         rest = cmd.RestOfString();
+         ParseRange();
+         if (cmd1 == "fillright") {
+            fillright = true;
+            rowstart = cr1.row;
+            colstart = cr1.col + 1;
+            }
+         else {
+            fillright = false;
+            rowstart = cr1.row + 1;
+            colstart = cr1.col;
+            }
+         for (row = rowstart; row <= cr2.row; row++) {
+            for (col = colstart; col <= cr2.col; col++) {
+               cr = SocialCalc.crToCoord(col, row);
+               cell=sheet.GetAssuredCell(cr);
+               if (saveundo) changes.AddUndo("set "+cr+" all", sheet.CellToString(cell));
+               if (fillright) {
+                  crbase = SocialCalc.crToCoord(cr1.col, row);
+                  coloffset = col - colstart + 1;
+                  rowoffset = 0;
+                  }
+               else {
+                  crbase = SocialCalc.crToCoord(col, cr1.row);
+                  coloffset = 0;
+                  rowoffset = row - rowstart + 1;
+                  }
+               basecell = sheet.GetAssuredCell(crbase);
+               if (rest == "all" || rest == "formats") {
+                  for (attrib in cellProperties) {
+                     if (cellProperties[attrib] == 1) continue; // copy only format attributes
+                     if (typeof basecell[attrib] === undefined || cellProperties[attrib] == 3) {
+                        delete cell[attrib];
+                        }
+                     else {
+                        cell[attrib] = basecell[attrib];
+                        }
+                     }
+                  }
+               if (rest == "all" || rest == "formulas") {
+                  cell.datavalue = basecell.datavalue;
+                  cell.datatype = basecell.datatype;            
+                  cell.valuetype = basecell.valuetype;
+                  if (cell.datatype == "f") { // offset relative coords, even in sheet references
+                     cell.formula = SocialCalc.OffsetFormulaCoords(basecell.formula, coloffset, rowoffset);
+                     }
+                  else {
+                     cell.formula = basecell.formula;
+                     }
+                  delete cell.parseinfo;
+                  cell.errors = basecell.errors;
+                  }
+               delete cell.displaystring;
+               }
+            }
+
+         attribs.needsrecalc = "yes";
+         break;
+
+      case "copy":
+         what = cmd.NextToken();
+         rest = cmd.RestOfString();
+         if (saveundo) changes.AddUndo("loadclipboard", SocialCalc.encodeForSave(SocialCalc.Clipboard.clipboard));
+         SocialCalc.Clipboard.clipboard = SocialCalc.CreateSheetSave(sheet, what);
+         break;
+
+      case "loadclipboard":
+         rest = cmd.RestOfString();
+         if (saveundo) changes.AddUndo("loadclipboard", SocialCalc.encodeForSave(SocialCalc.Clipboard.clipboard));
+         SocialCalc.Clipboard.clipboard = SocialCalc.decodeFromSave(rest);
+         break;
+
+      case "clearclipboard":
+         if (saveundo) changes.AddUndo("loadclipboard", SocialCalc.encodeForSave(SocialCalc.Clipboard.clipboard));
+         SocialCalc.Clipboard.clipboard = "";
+         break;
+
+      case "paste":
+         what = cmd.NextToken();
+         rest = cmd.RestOfString();
+         ParseRange();
+         if (!SocialCalc.Clipboard.clipboard) {
+            break;
+            }
+         clipsheet = new SocialCalc.Sheet(); // load clipboard contents as another sheet
+         clipsheet.ParseSheetSave(SocialCalc.Clipboard.clipboard);
+         cliprange = SocialCalc.ParseRange(clipsheet.copiedfrom);
+         coloffset = cr1.col - cliprange.cr1.col; // get sizes, etc.
+         rowoffset = cr1.row - cliprange.cr1.row;
+         numcols = cliprange.cr2.col - cliprange.cr1.col + 1;
+         numrows = cliprange.cr2.row - cliprange.cr1.row + 1;
+         if (cr1.col+numcols-1 > attribs.lastcol) attribs.lastcol = cr1.col+numcols-1;
+         if (cr1.row+numrows-1 > attribs.lastrow) attribs.lastrow = cr1.row+numrows-1;
+
+         for (row = cr1.row; row < cr1.row+numrows; row++) {
+            for (col = cr1.col; col < cr1.col+numcols; col++) {
+               cr = SocialCalc.crToCoord(col, row);
+               cell=sheet.GetAssuredCell(cr);
+               if (saveundo) changes.AddUndo("set "+cr+" all", sheet.CellToString(cell));
+               crbase = SocialCalc.crToCoord(col-coloffset, row-rowoffset);
+               basecell = clipsheet.GetAssuredCell(crbase);
+               if (rest == "all" || rest == "formats") {
+                  for (attrib in cellProperties) {
+                     if (cellProperties[attrib] == 1) continue; // copy only format attributes
+                     if (typeof basecell[attrib] === undefined || cellProperties[attrib] == 3) {
+                        delete cell[attrib];
+                        }
+                     else {
+                        attribtable = SocialCalc.CellPropertiesTable[attrib];
+                        if (attribtable && basecell[attrib]) { // table indexes to expand to strings since other sheet may have diff indexes
+                           cell[attrib] = sheet.GetStyleNum(attribtable, clipsheet.GetStyleString(attribtable, basecell[attrib]));
+                           }
+                        else { // these are not table indexes
+                           cell[attrib] = basecell[attrib];
+                           }
+                        }
+                     }
+                  }
+               if (rest == "all" || rest == "formulas") {
+                  cell.datavalue = basecell.datavalue;
+                  cell.datatype = basecell.datatype;            
+                  cell.valuetype = basecell.valuetype;
+                  if (cell.datatype == "f") { // offset relative coords, even in sheet references
+                     cell.formula = SocialCalc.OffsetFormulaCoords(basecell.formula, coloffset, rowoffset);
+                     }
+                  else {
+                     cell.formula = basecell.formula;
+                     }
+                  delete cell.parseinfo;
+                  cell.errors = basecell.errors;
+                  if (basecell.comment) { // comments are pasted as part of content, though not filled, etc.
+                     cell.comment = basecell.comment;
+                     }
+                  else if (cell.comment) {
+                     delete cell.comment;
+                     }
+                  }
+               delete cell.displaystring;
+               }
+            }
+
+         attribs.needsrecalc = "yes";
+         break;
+
+      case "sort": // sort cr1:cr2 col1 up/down col2 up/down col3 up/down
+         what = cmd.NextToken();
+         ParseRange();
+         cols = []; // get columns and sort directions (or "")
+         dirs = [];
+         lastsortcol = 0;
+         for (i=0; i<=3; i++) {
+            cols[i] = cmd.NextToken();
+            dirs[i] = cmd.NextToken();
+            if (cols[i]) lastsortcol = i;
+            }
+
+         sortcells = {}; // a copy of the data which will replace the original, but in the new order
+         sortlist = []; // an array of 0, 1, ..., nrows-1 needed for sorting
+         sortvalues = []; // values to be sorted corresponding to sortlist
+         sorttypes = []; // basic types of the values
+
+         for (row = cr1.row; row <= cr2.row; row++) { // fill in the sort info
+            for (col = cr1.col; col <= cr2.col; col++) {
+               cr = SocialCalc.crToCoord(col, row);
+               cell=sheet.cells[cr];
+               if (cell) { // only copy non-empty cells
+                  sortcells[cr] = sheet.CellToString(cell);
+                  if (saveundo) changes.AddUndo("set "+cr+" all", sortcells[cr]);
+                  }
+               else {
+                  if (saveundo) changes.AddUndo("set "+cr+" all");
+                  }
+               }
+            sortlist.push(sortlist.length);
+            sortvalues.push([]);
+            sorttypes.push([]);
+            slast = sorttypes.length-1;
+            for (i = 0; i <= lastsortcol; i++) {
+               cr = cols[i] + row; // get cr on this row in sort col
+               cell = sheet.GetAssuredCell(cr);
+               val = cell.datavalue;
+               valtype = cell.valuetype.charAt(0) || "b";
+               if (valtype == "t") val = val.toLowerCase();
+               sortvalues[slast].push(val);
+               sorttypes[slast].push(valtype);
+               }
+            }
+
+         sortfunction = function(a, b) { // a comparison function that can handle all the type variations
+            var i, a1, b1, ta, cresult;
+            for (i=0; i<=lastsortcol; i++) {
+               if (dirs[i] == "up") { // handle sort direction
+                  a1 = a; b1 = b;
+                  }
+               else {
+                  a1 = b; b1 = a;
+                  }
+               ta = sorttypes[a1][i];
+               tb = sorttypes[b1][i];
+               if (ta == "t") { // numbers < text < errors, blank always last no matter what dir
+                  if (tb == "t") {
+                     a1 = sortvalues[a1][i];
+                     b1 = sortvalues[b1][i];
+                     cresult = a1 > b1 ? 1 : (a1 < b1 ? -1 : 0);
+                     }
+                  else if (tb == "n") {
+                     cresult = 1;
+                     }
+                  else if (tb == "b") {
+                     cresult = dirs[i] == "up" ? -1 : 1;
+                     }
+                  else if (tb == "e") {
+                     cresult = -1;
+                     }
+                  }
+               else if (ta == "n") {
+                  if (tb == "t") {
+                     cresult = -1;
+                     }
+                  else if (tb == "n") {
+                     a1 = sortvalues[a1][i]-0; // force to numeric, just in case
+                     b1 = sortvalues[b1][i]-0;
+                     cresult = a1 > b1 ? 1 : (a1 < b1 ? -1 : 0);
+                     }
+                  else if (tb == "b") {
+                     cresult = dirs[i] == "up" ? -1 : 1;
+                     }
+                  else if (tb == "e") {
+                     cresult = -1;
+                     }
+                  }
+               else if (ta == "e") {
+                  if (tb == "e") {
+                     a1 = sortvalues[a1][i];
+                     b1 = sortvalues[b1][i];
+                     cresult = a1 > b1 ? 1 : (a1 < b1 ? -1 : 0);
+                     }
+                  else if (tb == "b") {
+                     cresult = dirs[i] == "up" ? -1 : 1;
+                     }
+                  else {
+                     cresult = 1;
+                     }
+                  }
+               else if (ta == "b") {
+                  if (tb == "b") {
+                     cresult = 0;
+                     }
+                  else {
+                     cresult = dirs[i] == "up" ? 1 : -1;
+                     }
+                  }
+               if (cresult) { // return if tested not equal, otherwise do next column
+                  return cresult;
+                  }
+               }
+            cresult = a > b ? 1 : (a < b ? -1 : 0); // equal - return position in original to maintain it
+            return cresult;
+            }
+
+         sortlist.sort(sortfunction);
+
+         for (row = cr1.row; row <= cr2.row; row++) { // copy original rows into sorted positions
+            originalrow = sortlist[row-cr1.row]; // relative position where it was in original
+            for (col = cr1.col; col <= cr2.col; col++) {
+               cr = SocialCalc.crToCoord(col, row);
+               sortedcr = SocialCalc.crToCoord(col, originalrow+cr1.row); // original cell to be put in new place
+               if (sortcells[sortedcr]) {
+                  cell = new SocialCalc.Cell(cr);
+                  sheet.CellFromStringParts(cell, sortcells[sortedcr].split(":"), 1);
+                  if (cell.datatype == "f") { // offset coord refs, even to ***relative*** coords in other sheets
+                     cell.formula = SocialCalc.OffsetFormulaCoords(cell.formula, 0, (row-cr1.row)-originalrow);
+                     }
+                  sheet.cells[cr] = cell;
+                  }
+               else {
+                  delete sheet.cells[cr];
+                  }
+               }
+            }
+
+         attribs.needsrecalc = "yes";
+         break;
+
+      case "insertcol":
+      case "insertrow":
+         what = cmd.NextToken();
+         rest = cmd.RestOfString();
+         ParseRange();
+
+         if (cmd1 == "insertcol") {
+            coloffset = 1;
+            colend = cr1.col;
+            rowoffset = 0;
+            rowend = 1;
+            newcolstart = cr1.col;
+            newcolend = cr1.col;
+            newrowstart = 1;
+            newrowend = attribs.lastrow;
+            if (saveundo) changes.AddUndo("deletecol "+cr1.coord);
+            }
+         else {
+            coloffset = 0;
+            colend = 1;
+            rowoffset = 1;
+            rowend = cr1.row;
+            newcolstart = 1;
+            newcolend = attribs.lastcol;
+            newrowstart = cr1.row;
+            newrowend = cr1.row;
+            if (saveundo) changes.AddUndo("deleterow "+cr1.coord);
+            }
+
+         for (row=attribs.lastrow; row >= rowend; row--) { // copy the cells forward
+            for (col=attribs.lastcol; col >= colend; col--) {
+               crbase = SocialCalc.crToCoord(col, row);
+               cr = SocialCalc.crToCoord(col+coloffset, row+rowoffset);
+               if (!sheet.cells[crbase]) { // copying empty cell
+                  delete sheet.cells[cr]; // delete anything that may have been there
+                  }
+               else { // overwrite existing cell with moved contents
+                  sheet.cells[cr] = sheet.cells[crbase];
+                  }
+               }
+            }
+
+         for (row=newrowstart; row <= newrowend; row++) { // fill the "new" empty cells
+            for (col=newcolstart; col <= newcolend; col++) {
+               cr = SocialCalc.crToCoord(col, row);
+               cell = new SocialCalc.Cell(cr);
+               sheet.cells[cr] = cell;
+               crbase = SocialCalc.crToCoord(col-coloffset, row-rowoffset); // copy attribs of the one before (0 gives you A or 1)
+               basecell = sheet.GetAssuredCell(crbase);
+               for (attrib in cellProperties) {
+                  if (cellProperties[attrib] == 2) { // copy only format attributes
+                     cell[attrib] = basecell[attrib];
+                     }
+                  }
+               }
+            }
+
+         for (cr in sheet.cells) { // update cell references to moved cells in calculated formulas
+             cell = sheet.cells[cr];
+             if (cell && cell.datatype == "f") {
+                cell.formula = SocialCalc.AdjustFormulaCoords(cell.formula, cr1.col, coloffset, cr1.row, rowoffset);
+                }
+             if (cell) {
+                delete cell.parseinfo;
+                }
+             }
+
+         for (name in sheet.names) { // update cell references to moved cells in names
+            if (sheet.names[name]) { // works with "A1", "A1:A20", and "=formula" forms
+               v1 = sheet.names[name].definition;
+               v2 = "";
+               if (v1.charAt(0) == "=") {
+                  v2 = "=";
+                  v1 = v1.substring(1);
+                  }
+               sheet.names[name].definition = v2 +
+                  SocialCalc.AdjustFormulaCoords(v1, cr1.col, coloffset, cr1.row, rowoffset);
+               }
+            }
+
+         for (row = attribs.lastrow; row >= rowend && cmd1 == "insertrow"; row--) { // copy the row attributes forward
+            rownext = row + rowoffset;
+            for (attrib in sheet.rowattribs) {
+               val = sheet.rowattribs[attrib][row];
+               if (sheet.rowattribs[attrib][rownext] != val) { // make assignment only if different
+                  if (val) {
+                     sheet.rowattribs[attrib][rownext] = val;
+                     }
+                  else {
+                     delete sheet.rowattribs[attrib][rownext];
+                     }
+                  }
+               }
+            }
+
+         for (col = attribs.lastcol; col >= colend && cmd1 == "insertcol"; col--) { // copy the column attributes forward
+            colthis = SocialCalc.rcColname(col);
+            colnext = SocialCalc.rcColname(col + coloffset);
+            for (attrib in sheet.colattribs) {
+               val = sheet.colattribs[attrib][colthis];
+               if (sheet.colattribs[attrib][colnext] != val) { // make assignment only if different
+                  if (val) {
+                     sheet.colattribs[attrib][colnext] = val;
+                     }
+                  else {
+                     delete sheet.colattribs[attrib][colnext];
+                     }
+                  }
+               }
+            }
+
+         attribs.lastcol += coloffset;
+         attribs.lastrow += rowoffset;
+         attribs.needsrecalc = "yes";
+         break;
+
+      case "deletecol":
+      case "deleterow":
+         what = cmd.NextToken();
+         rest = cmd.RestOfString();
+         lastcol = attribs.lastcol; // save old values since ParseRange sets...
+         lastrow = attribs.lastrow;
+         ParseRange();
+
+         if (cmd1 == "deletecol") {
+            coloffset = cr1.col - cr2.col - 1;
+            rowoffset = 0;
+            colstart = cr2.col + 1;
+            rowstart = 1;
+            }
+         else {
+            coloffset = 0;
+            rowoffset = cr1.row - cr2.row - 1;
+            colstart = 1;
+            rowstart = cr2.row + 1;
+            }
+
+         for (row=rowstart; row <= lastrow - rowoffset; row++) { // copy the cells backwards - extra so no dup of last set
+            for (col=colstart; col <= lastcol - coloffset; col++) {
+               cr = SocialCalc.crToCoord(col+coloffset, row+rowoffset);
+               if (saveundo && (row<rowstart-rowoffset || col<colstart	-coloffset)) { // save cells that are overwritten as undo info
+                  cell = sheet.cells[cr];
+                  if (!cell) { // empty cell
+                     changes.AddUndo("erase "+cr+" all");
+                     }
+                  else {
+                     changes.AddUndo("set "+cr+" all", sheet.CellToString(cell));
+                     }
+                  }
+               crbase = SocialCalc.crToCoord(col, row);
+               cell = sheet.cells[crbase];
+               if (!cell) { // copying empty cell
+                  delete sheet.cells[cr]; // delete anything that may have been there
+                  }
+               else { // overwrite existing cell with moved contents
+                  sheet.cells[cr] = cell;
+                  }
+               }
+            }
+
+//!!! multiple deletes isn't setting #REF!; need to fix up #REF!'s on undo but only those!
+
+         for (cr in sheet.cells) { // update cell references to moved cells in calculated formulas
+             cell = sheet.cells[cr];
+             if (cell) {
+                if (cell.datatype == "f") {
+                   oldformula = cell.formula;
+                   cell.formula = SocialCalc.AdjustFormulaCoords(oldformula, cr1.col, coloffset, cr1.row, rowoffset);
+                   if (cell.formula != oldformula) {
+                      delete cell.parseinfo;
+                      if (saveundo && cell.formula.indexOf("#REF!")!=-1) { // save old version only if removed coord
+                         oldcr = SocialCalc.coordToCr(cr);
+                         changes.AddUndo("set "+SocialCalc.rcColname(oldcr.col-coloffset)+(oldcr.row-rowoffset)+
+                                         " formula "+oldformula);
+                         }
+                      }
+                   }
+                else {
+                   delete cell.parseinfo;
+                   }
+                }
+             }
+
+         for (name in sheet.names) { // update cell references to moved cells in names
+            if (sheet.names[name]) { // works with "A1", "A1:A20", and "=formula" forms
+               v1 = sheet.names[name].definition;
+               v2 = "";
+               if (v1.charAt(0) == "=") {
+                  v2 = "=";
+                  v1 = v1.substring(1);
+                  }
+               sheet.names[name].definition = v2 +
+                  SocialCalc.AdjustFormulaCoords(v1, cr1.col, coloffset, cr1.row, rowoffset);
+               }
+            }
+
+         for (row = rowstart; row <= lastrow - rowoffset && cmd1 == "deleterow"; row++) { // copy the row attributes backwards
+            rowbefore = row + rowoffset;
+            for (attrib in sheet.rowattribs) {
+               val = sheet.rowattribs[attrib][row];
+               if (sheet.rowattribs[attrib][rowbefore] != val) { // make assignment only if different
+                  if (saveundo) changes.AddUndo("set "+rowbefore+" "+attrib, sheet.rowattribs[attrib][rowbefore]);
+                  if (val) {
+                     sheet.rowattribs[attrib][rowbefore] = val;
+                     }
+                  else {
+                     delete sheet.rowattribs[attrib][rowbefore];
+                     }
+                  }
+               }
+            }
+
+         for (col = colstart; col <= lastcol - coloffset && cmd1 == "deletecol"; col++) { // copy the column attributes backwards
+            colthis = SocialCalc.rcColname(col);
+            colbefore = SocialCalc.rcColname(col + coloffset);
+            for (attrib in sheet.colattribs) {
+               val = sheet.colattribs[attrib][colthis];
+               if (sheet.colattribs[attrib][colbefore] != val) { // make assignment only if different
+                  if (saveundo) changes.AddUndo("set "+colbefore+" "+attrib, sheet.colattribs[attrib][colbefore]);
+                  if (val) {
+                     sheet.colattribs[attrib][colbefore] = val;
+                     }
+                  else {
+                     delete sheet.colattribs[attrib][colbefore];
+                     }
+                  }
+               }
+            }
+
+         if (saveundo) {
+            if (cmd1 == "deletecol") {
+               for (col=cr1.col; col<=cr2.col; col++) {
+                  changes.AddUndo("insertcol "+SocialCalc.rcColname(col));
+                  }
+               }
+            else {
+               for (row=cr1.row; row<=cr2.row; row++) {
+                  changes.AddUndo("insertrow "+row);
+                  }
+               }
+            }
+
+         if (cmd1 == "deletecol") {
+            if (cr1.col <= lastcol) { // shrink sheet unless deleted phantom cols off the end
+               if (cr2.col <= lastcol) {
+                  attribs.lastcol += coloffset;
+                  }
+               else {
+                  attribs.lastcol = cr1.col - 1;
+                  }
+               }
+            }
+         else {
+            if (cr1.row <= lastrow) { // shrink sheet unless deleted phantom rows off the end
+               if (cr2.row <= lastrow) {
+                  attribs.lastrow += rowoffset;
+                  }
+               else {
+                  attribs.lastrow = cr1.row - 1;
+                  }
+               }
+            }
+         attribs.needsrecalc = "yes";
+         break;
+
+
+      case "name":
+         what = cmd.NextToken();
+         name = cmd.NextToken();
+         rest = cmd.RestOfString();
+
+         name = name.toUpperCase().replace(/[^A-Z0-9_\.]/g, "");
+         if (name == "") break; // must have something
+
+         if (what == "define") {
+            if (rest == "") break; // must have something
+            if (sheet.names[name]) { // already exists
+               if (saveundo) changes.AddUndo("name define "+name+" "+sheet.names[name].definition);
+               sheet.names[name].definition = rest;
+               }
+            else { // new
+               if (saveundo) changes.AddUndo("name delete "+name);
+               sheet.names[name] = {definition: rest, desc: ""};
+               }
+            }
+         else if (what == "desc") {
+            if (sheet.names[name]) { // must already exist
+               if (saveundo) changes.AddUndo("name desc "+name+" "+sheet.names[name].desc);
+               sheet.names[name].desc = rest;
+               }
+            }
+         else if (what == "delete") {
+            if (saveundo) {
+               if (sheet.names[name].desc) changes.AddUndo("name define "+name+" "+sheet.names[name].desc);
+               changes.AddUndo("name define "+name+" "+sheet.names[name].definition);
+               }
+            delete sheet.names[name];
+            }
+         attribs.needsrecalc = "yes";
+
+         break;
+
+      default:
+         errortext = "Unknown command: "+cmdstr;
+         break;
+      }
+
+      cmd.NextLine(); // see if another command
+
+//!! END OF NEED TO INDENT!!!!
+
+      } // end of while
+
+/* For Debugging:
+var ustack="";
+for (var i=0;i<sheet.changes.stack.length;i++) {
+   ustack+=(i-0)+":"+sheet.changes.stack[i].command[0]+" of "+sheet.changes.stack[i].command.length+"/"+sheet.changes.stack[i].undo[0]+" of "+sheet.changes.stack[i].undo.length+",";
+   }
+alert(cmdstr+"|"+sheet.changes.stack.length+"--"+ustack);
+*/
+
+   return errortext;
+
+   }
+
+SocialCalc.SheetUndo = function(sheet) {
+
+   var i;
+   var tos = sheet.changes.TOS();
+   var lastone = tos ? tos.undo.length-1 : -1;
+   for (i=lastone; i>=0; i--) { // do them backwards
+      sheet.ExecuteSheetCommand(tos.undo[i], false); // do undo operations
+      }
+   sheet.changes.Undo();
+   }
+
+SocialCalc.SheetRedo = function(sheet) {
+
+   var tos, i;
+   var didredo = sheet.changes.Redo();
+   if (!didredo) return;
+   tos = sheet.changes.TOS();
+
+   for (i=0; tos && i<tos.command.length; i++) {
+      sheet.ExecuteSheetCommand(tos.command[i], false);
+      }
+
+   }
+
+SocialCalc.CreateAuditString = function(sheet) {
+
+   var i, j;
+   var result = "";
+   var stack = sheet.changes.stack;
+   var tos = sheet.changes.tos;
+   for (i=0; i<=tos; i++) {
+      for (j=0; j<stack[i].command.length; j++) {
+         result += stack[i].command[j] + "\n";
+         }
+      }
+
+   return result;
+
+   }
+
+SocialCalc.GetStyleNum = function(sheet, atype, style) {
+
+   var num;
+
+   if (style.length==0) return 0; // null means use zero, which means default or global default
+
+   num = sheet[atype+"hash"][style];
+   if (!num) {
+      if (sheet[atype+"s"].length<1) sheet[atype+"s"].push("");
+      num = sheet[atype+"s"].push(style) - 1;
+      sheet[atype+"hash"][style] = num;
+      }
+   return num;
+
+   }
+
+SocialCalc.GetStyleString = function(sheet, atype, num) {
+
+   if (!num) return null; // zero, null, and undefined return null
+
+   return sheet[atype+"s"][num];
+
+   }
+
+//
+// updatedformula = SocialCalc.OffsetFormulaCoords(formula, coloffset, rowoffset)
+//
+// Change relative cell references by offsets (even those to other worksheets so fill, paste, sort work as expected).
+// If not what you want, use absolute references.
+//
+
+SocialCalc.OffsetFormulaCoords = function(formula, coloffset, rowoffset) {
+
+   var parseinfo, ttext, ttype, i, cr, newcr;
+   var updatedformula = "";
+   var scf = SocialCalc.Formula;
+   if (!scf) {
+      return "Need SocialCalc.Formula";
+      }
+   var tokentype = scf.TokenType;
+   var token_op = tokentype.op;
+   var token_string = tokentype.string;
+   var token_coord = tokentype.coord;
+   var tokenOpExpansion = scf.TokenOpExpansion;
+
+   parseinfo = scf.ParseFormulaIntoTokens(formula);
+
+   for (i=0; i<parseinfo.length; i++) {
+      ttype = parseinfo[i].type;
+      ttext = parseinfo[i].text;
+      if (ttype == token_coord) {
+         newcr = "";
+         cr = SocialCalc.coordToCr(ttext);
+         if (ttext.charAt(0)!="$") { // add col offset unless absolute column
+            cr.col += coloffset;
+            }
+         else {
+            newcr += "$";
+            }
+         newcr += SocialCalc.rcColname(cr.col);
+         if (ttext.indexOf("$", 1)==-1) { // add row offset unless absolute row
+            cr.row += rowoffset;
+            }
+         else {
+            newcr += "$";
+            }
+         newcr += cr.row;
+         if (cr.row < 1 || cr.col < 1) {
+            newcr = "#REF!";
+            }
+         updatedformula += newcr;
+         }
+      else if (ttype == token_string) {
+         if (ttext.indexOf('"') >= 0) { // quotes to double
+            updatedformula += '"' + ttext.replace(/"/, '""') + '"';
+            }
+         else updatedformula += '"' + ttext + '"';
+         }
+      else if (ttype == token_op) {
+         updatedformula += tokenOpExpansion[ttext] || ttext; // make sure short tokens (e.g., "G") go back full (">=")
+         }
+      else { // leave everything else alone
+         updatedformula += ttext;
+         }
+      }
+
+   return updatedformula;
+
+   }
+
+//
+// updatedformula = SocialCalc.AdjustFormulaCoords(formula, col, coloffset, row, rowoffset)
+//
+// Change all cell references to cells starting with col/row by offsets
+//
+
+SocialCalc.AdjustFormulaCoords = function(formula, col, coloffset, row, rowoffset) {
+
+   var ttype, ttext, i, newcr;
+   var updatedformula = "";
+   var sheetref = false;
+   var scf = SocialCalc.Formula;
+   if (!scf) {
+      return "Need SocialCalc.Formula";
+      }
+   var tokentype = scf.TokenType;
+   var token_op = tokentype.op;
+   var token_string = tokentype.string;
+   var token_coord = tokentype.coord;
+   var tokenOpExpansion = scf.TokenOpExpansion;
+
+   parseinfo = SocialCalc.Formula.ParseFormulaIntoTokens(formula);
+
+   for (i=0; i<parseinfo.length; i++) {
+      ttype = parseinfo[i].type;
+      ttext = parseinfo[i].text;
+      if (ttype == token_op) { // references with sheet specifier are not offset
+         if (ttext == "!") {
+            sheetref = true; // found a sheet reference
+            }
+         else if (ttext != ":") { // for everything but a range, reset
+            sheetref = false;
+            }
+         ttext = tokenOpExpansion[ttext] || ttext; // make sure short tokens (e.g., "G") go back full (">=")
+         }
+      if (ttype == token_coord) {
+         cr = SocialCalc.coordToCr(ttext);
+         if ((coloffset < 0 && cr.col >= col && cr.col < col-coloffset) ||
+             (rowoffset < 0 && cr.row >= row && cr.row < row-rowoffset)) { // refs to deleted cells become invalid
+            if (!sheetref) {
+               cr.col = 0;
+               cr.row = 0;
+               }
+            }
+         if (!sheetref) {
+            if (cr.col >= col) {
+               cr.col += coloffset;
+               }
+            if (cr.row >= row) {
+               cr.row += rowoffset;
+               }
+            }
+         if (ttext.charAt(0)=="$") {
+            newcr = "$"+SocialCalc.rcColname(cr.col);
+            }
+         else {
+            newcr = SocialCalc.rcColname(cr.col);
+            }
+         if (ttext.indexOf("$", 1)!=-1) {
+            newcr += "$" + cr.row;
+            }
+         else {
+            newcr += cr.row;
+            }
+         if (cr.row < 1 || cr.col < 1) {
+            newcr = "#REF!";
+            }
+         ttext = newcr;
+         }
+      else if (ttype == token_string) {
+         if (ttext.indexOf('"') >= 0) { // quotes to double
+            ttext = '"' + ttext.replace(/"/, '""') + '"';
+            }
+         else ttext = '"' + ttext + '"';
+         }
+      updatedformula += ttext;
+      }
+
+   return updatedformula;
+
+   }
+
+
+// Recalc the entire sheet
+
+SocialCalc.RecalcSheet = function(sheet) {
+
+   var coord, err;
+
+   sheet.checked = {};
+   sheet.attribs.circularreferencecell;
+
+   for (coord in sheet.cells) {
+      if (!coord) continue;
+      err = sheet.CheckAndCalcCell(coord);
+      }
+
+   delete sheet.checked; // save memory and clear out for name lookup formula evaluation
+
+   delete sheet.attribs.needsrecalc; // remember recalc done
+
+   }
+
+
+//
+// circref = SocialCalc.CheckAndCalcCell(sheet, coord)
+//
+// Recalculates one cell after making sure dependencies are calc'ed, too
+// If circular reference, returns non-null.
+// Circular referenced detected by using sheet.checked[coord]:
+//    null or undefined - not evaluated
+//    1 - cell is being recursed into -- if get back here => circular reference
+//    2 - cell was fully recursed into and calculated this recalc cycle
+//
+
+SocialCalc.CheckAndCalcCell = function(sheet, coord) {
+
+   var parseinfo, ttext, ttype, i, cr1, cr2, c1, c2, r1, r2, r, c, rangecoord, circref, eresult, value, pos, pos2;
+   var scf = SocialCalc.Formula;
+   if (!scf) {
+      return "Need SocialCalc.Formula";
+      }
+   var tokentype = scf.TokenType;
+   var token_op = tokentype.op;
+   var token_name = tokentype.name;
+   var token_coord = tokentype.coord;
+
+   var checked = sheet.checked;
+   var sheetref = false;
+
+   var cell = sheet.cells[coord];
+
+   if (!cell || cell.datatype != "f") { // only calc formulas
+      return "";
+      }
+   if (checked[coord] == 2) { // Already calculated this time
+      return "";
+      }
+   else if (checked[coord] == 1) { // Circular reference
+      cell.errors = "Circular reference to "+coord;
+      return cell.errors;
+      }
+
+   if (cell.errors) { // delete errors from previous recalcs
+      delete cell.errors;
+      }
+
+   if (!cell.parseinfo) {
+      cell.parseinfo = scf.ParseFormulaIntoTokens(cell.formula);
+      }
+   parseinfo = cell.parseinfo;
+
+   checked[coord] = 1; // Remember we are in progress
+
+   for (i=0; i<parseinfo.length; i++) {
+      ttype = parseinfo[i].type;
+      ttext = parseinfo[i].text;
+      if (ttype == token_op) { // references with sheet specifier are not recursed into
+         if (ttext == "!") {
+            sheetref = true; // found a sheet reference
+            }
+         else if (ttext != ":") { // for everything but a range, reset
+            sheetref = false;
+            }
+         }
+      if (ttype == token_name) { // look for named range
+         value = scf.LookupName(sheet, ttext);
+         if (value.type == "range") { // only need to recurse here for range, which may be just one cell
+            pos = value.value.indexOf("|");
+            if (pos != -1) {
+               cr1 = SocialCalc.coordToCr(value.value.substring(0,pos));
+               pos2 = value.value.indexOf("|", pos+1);
+               cr2 = SocialCalc.coordToCr(value.value.substring(pos+1,pos2));
+               if (cr1.col > cr2.col) { c1 = cr2.col; c2 = cr1.col; }
+               else { c1 = cr1.col; c2 = cr2.col; }
+               if (cr1.row > cr2.row) { r1 = cr2.row; r2 = cr1.row; }
+               else { r1 = cr1.row; r2 = cr2.row; }
+               for (r=r1; r <= r2; r++) { // Checks first cell a second time, but that should just return
+                  for (c=c1; c <= c2; c++) {
+                     rangecoord = SocialCalc.crToCoord(c, r);
+                     circref = sheet.CheckAndCalcCell(rangecoord);
+                     if (circref)
+                        sheet.attribs.circularreferencecell = coord+"|"+rangecoord;
+                     }
+                  }
+               }
+            }
+         }
+      if (ttype == token_coord) {
+         if (i >= 2 
+             && parseinfo[i-1].type == token_op && parseinfo[i-1].text == ':'
+             && parseinfo[i-2].type == token_coord
+             && !sheetref) { // Range -- check each cell
+            cr1 = SocialCalc.coordToCr(parseinfo[i-2].text);
+            cr2 = SocialCalc.coordToCr(ttext);
+            if (cr1.col > cr2.col) { c1 = cr2.col; c2 = cr1.col; }
+            else { c1 = cr1.col; c2 = cr2.col; }
+            if (cr1.row > cr2.row) { r1 = cr2.row; r2 = cr1.row; }
+            else { r1 = cr1.row; r2 = cr2.row; }
+            for (r=r1; r <= r2; r++) { // Checks first cell a second time, but that should just return
+               for (c=c1; c <= c2; c++) {
+                  rangecoord = SocialCalc.crToCoord(c, r);
+                  circref = sheet.CheckAndCalcCell(rangecoord);
+                  if (circref)
+                     sheet.attribs.circularreferencecell = coord+"|"+rangecoord;
+                  }
+               }
+            }
+         else if (!sheetref) { // Single cell reference
+            if (ttext.indexOf("$") != -1) ttext = ttext.replace(/\$/g, ""); // remove any $'s
+            circref = sheet.CheckAndCalcCell(ttext);
+            if (circref)
+               sheet.attribs.circularreferencecell = coord+"|"+ttext; // remember at least one circ ref
+            }
+         }      
+      }
+
+   eresult = scf.evaluate_parsed_formula(parseinfo, sheet, false);
+   cell.datavalue = eresult.value;
+   cell.valuetype = eresult.type;
+   delete cell.displaystring;
+   if (eresult.error) {
+      cell.errors = eresult.error;
+      }
+   checked[coord] = 2; // Remember we were here
+
+   return "";
+
+   }
+
+// *************************************
+//
+// Parse class:
+//
+// *************************************
+
+SocialCalc.Parse = function(str) {
+
+   // properties:
+
+   this.str = str;
+   this.pos = 0;
+   this.delimiter = " ";
+   this.lineEnd = str.indexOf("\n");
+   if (this.lineEnd < 0) {
+      this.lineEnd = str.length;
+      }
+
+   }
+
+SocialCalc.Parse.prototype.NextToken = function() {
+   if (this.pos < 0) return "";
+   var pos2 = this.str.indexOf(this.delimiter, this.pos);
+   var pos1 = this.pos;
+   if (pos2 > this.lineEnd) { // don't go past end of line
+      pos2 = this.lineEnd;
+      }
+   if (pos2 >= 0) {
+      this.pos = pos2 + 1;
+      return this.str.substring(pos1, pos2);
+      }
+   else {
+      this.pos = -1;
+      return this.str.substring(pos1);
+      }
+   }
+
+SocialCalc.Parse.prototype.RestOfString = function() {
+   var oldpos = this.pos;
+   if (this.pos < 0 || this.pos >= this.lineEnd) return "";
+   this.pos = this.lineEnd;
+   return this.str.substring(oldpos, this.lineEnd);
+   }
+
+SocialCalc.Parse.prototype.RestOfStringNoMove = function() {
+   if (this.pos < 0 || this.pos >= this.lineEnd) return "";
+   return this.str.substring(this.pos, this.lineEnd);
+   }
+
+SocialCalc.Parse.prototype.NextLine = function() {
+   this.pos = this.lineEnd + 1;
+   this.lineEnd = this.str.indexOf("\n", this.pos);
+   if (this.lineEnd < 0) {
+      this.lineEnd = this.str.length;
+      }
+   }
+
+SocialCalc.Parse.prototype.EOF = function() {
+   if (this.pos < 0 || this.pos >= this.str.length) return true;
+   return false;
+   }
+
+
+// *************************************
+//
+// UndoStack class:
+//
+// Implements the behavior needed for a normal application's undo/redo stack.
+// You add a new change sequence with PushChange.
+// The type argument is a string that can be used to look upsome general string 
+// like "typing" or "setting attribute" for the menu prompts for undo/redo.
+//
+// You add the "do" steps with AddDo. The non-null, non-undefined arguments are
+// joined together with " " to make a command string to be saved.
+//
+// You add the undo steps as commands for the most recent change with AddUndo.
+// The non-null, non-undefined arguments are joined together with " " to make
+// a command string to be saved.
+//
+// The Undo and Redo functions move the Top Of Stack pointer through the changes stack
+// so you can undo and redo. Doing a new PushChange removes all undone items
+// after TOS.
+//
+// *************************************
+
+SocialCalc.UndoStack = function() {
+
+   // properties:
+
+   this.stack = []; // {command: [], type: type, undo: []} -- multiple dos and undos allowed
+   this.tos = -1; // top of stack position, used for undo/redo
+
+   }
+
+SocialCalc.UndoStack.prototype.PushChange = function(type) {
+   while (this.stack.length > 0 && this.stack.length-1 > this.tos) {
+      this.stack.pop();
+      }
+   this.stack.push({command: [], type: type, undo: []});
+   this.tos = this.stack.length - 1;
+   }
+
+SocialCalc.UndoStack.prototype.AddDo = function() {
+   var args = [];
+   for (var i=0; i<arguments.length; i++) {
+      if (arguments[i]!=null) args.push(arguments[i]); // ignore null or undefined
+      }
+   var cmd = args.join(" ");
+   this.stack[this.stack.length-1].command.push(cmd);
+   }
+
+SocialCalc.UndoStack.prototype.AddUndo = function() {
+   var args = [];
+   for (var i=0; i<arguments.length; i++) {
+      if (arguments[i]!=null) args.push(arguments[i]); // ignore null or undefined
+      }
+   var cmd = args.join(" ");
+   this.stack[this.stack.length-1].undo.push(cmd);
+   }
+
+SocialCalc.UndoStack.prototype.TOS = function() {
+   if (this.tos >= 0) return this.stack[this.tos];
+   else return null;
+   }
+
+SocialCalc.UndoStack.prototype.Undo = function() {
+   if (this.tos >= 0) {
+      this.tos -= 1;
+      return true;
+      }
+   else {
+      return false;
+      }
+   }
+
+SocialCalc.UndoStack.prototype.Redo = function() {
+   if (this.tos < this.stack.length-1) {
+      this.tos += 1;
+      return true;
+      }
+   else {
+      return false;
+      }
+   }
+
+// *************************************
+//
+// Clipboard Object:
+//
+// This is a single object.
+// Stores the clipboard, which is shared by all active sheets.
+// Like the undo stack, it does not persist from one editing session to another.
+//
+// *************************************
+
+SocialCalc.Clipboard = {
+
+   // properties:
+
+   clipboard:  "" // empty or string in save format with "copiedfrom:" set to a range
+
+   }
+
+
+// *************************************
+//
+// RenderContext class:
+//
+// *************************************
+
+SocialCalc.RenderContext = function(sheetobj) {
+
+   var parts, num, s;
+   var attribs = sheetobj.attribs;
+
+   // properties:
+
+   this.sheetobj = sheetobj;
+   this.hideRowsCols = false; // Rendering with panes only works with "false"
+   this.showGrid = false;
+   this.showRCHeaders = false;
+   this.rownamewidth = "30";
+   this.pixelsPerRow = SocialCalc.defaultvalues.assumedrowheight;
+
+   this.cellskip = {}; // if present, coord of cell covering this cell
+   this.coordToCR = {}; // for cells starting spans, coordToCR[coord]={row:row, col:col}
+   this.colwidth = []; // precomputed column widths, taking into account defaults
+   this.totalwidth = 0; // precomputed total table width
+
+   this.rowpanes = []; // for each pane, {first: firstrow, last: lastrow}
+   this.colpanes = []; // for each pane, {first: firstrow, last: lastrow}
+   this.maxcol=0; // max col and row to display, adding long spans, etc.
+   this.maxrow=0;
+
+   this.highlights = {}; // for each cell with special display: coord:highlightType (see this.highlightTypes)
+   this.highlights.hascursor = null; // null/false or true
+
+   this.highlightTypes = // attributes to change when highlit
+      {
+         cursor: {color: "#FFF", backgroundColor: "#A6A6A6"}, // {color: "#000", backgroundColor: "#BFD4F9"},
+         range: {color: "#000", backgroundColor: "#E5E5E5"}, // {color: "#000", backgroundColor: "#9DB1D6"}, //8EADE4
+         rangecorner: {color: "#000", backgroundColor: "#E5E5E5"} // {color: "#000", backgroundColor: "#9DB1D6"}
+      }
+
+   this.cellIDprefix = "cell_"; // if non-null, each cell will render with an ID
+
+   // constants:
+
+   this.defaultfontstyle = SocialCalc.defaultvalues.defaultfontstyle;
+   this.defaultfontsize = SocialCalc.defaultvalues.defaultfontsize;
+   this.defaultfontfamily = SocialCalc.defaultvalues.defaultfontfamily;
+   this.defaultskippedcellstyle = "background-color:#CCC";
+   this.defaultpanedividerstyle = "background-color:#FFF;padding:0px;";
+   this.defaultpanedividerwidth = "2";
+   this.defaultpanedividerheight = "3";
+
+   this.gridCSS = "1px solid #ECECEC;";
+
+   this.classnames = // any combination of classnames and explicitStyles can be used
+      {
+         colname: "",
+         rowname: "",
+         selectedcolname: "",
+         selectedrowname: "",
+         upperleft: "",
+         skippedcell: "",
+         panedivider: ""
+      };
+
+   this.explicitStyles = // these may be used so you won't need a stylesheet with the classnames
+      {
+         colname: "text-align: center;color: #FFFFFF;background-color: #808080;", // background-color: #80A9F3;",
+         rowname: "text-align: right;color: #FFFFFF;background-color: #808080;", // background-color: #80A9F3;",
+         selectedcolname: "text-align: center;color: #FFFFFF;background-color: #404040;", // background-color: #394F87;",
+         selectedrowname: "text-align: right;color: #FFFFFF;background-color: #404040;", // background-color: #394F87;",
+         upperleft: "",
+         skippedcell: "background-color:#CCC",
+         panedivider: "background-color:#ECECEC;padding:0px;"
+      };
+
+   // precomputed values
+
+   this.fonts=[];
+
+   // if have a sheet object, initialize constants and precomputed values
+
+   if (sheetobj) {
+      SocialCalc.PrecomputeSheetFonts(this);
+      this.rowpanes[0] = {first: 1, last: attribs.lastrow};
+      this.colpanes[0] = {first: 1, last: attribs.lastcol};
+
+      }
+   else throw "Render Context must have a sheet object";
+
+   }
+
+// Methods:
+
+SocialCalc.RenderContext.prototype.PrecomputeSheetFonts = function() {SocialCalc.PrecomputeSheetFonts(this);};
+SocialCalc.RenderContext.prototype.CalculateCellSkipData = function() {SocialCalc.CalculateCellSkipData(this);};
+SocialCalc.RenderContext.prototype.CalculateColWidthData = function() {SocialCalc.CalculateColWidthData(this);};
+SocialCalc.RenderContext.prototype.SetRowPaneFirstLast = function(panenum, first, last) {this.rowpanes[panenum]={first:first, last:last};};
+SocialCalc.RenderContext.prototype.SetColPaneFirstLast = function(panenum, first, last) {this.colpanes[panenum]={first:first, last:last};};
+SocialCalc.RenderContext.prototype.CoordInPane = function(coord, rowpane, colpane) {return SocialCalc.CoordInPane(this, coord, rowpane, colpane);};
+SocialCalc.RenderContext.prototype.CellInPane = function(row, col, rowpane, colpane) {return SocialCalc.CellInPane(this, row, col, rowpane, colpane);};
+SocialCalc.RenderContext.prototype.InitializeTable = function(tableobj) {SocialCalc.InitializeTable(this, tableobj);};
+SocialCalc.RenderContext.prototype.RenderSheet = function(oldtable, linkstyle) {return SocialCalc.RenderSheet(this, oldtable, linkstyle);};
+SocialCalc.RenderContext.prototype.RenderColGroup = function() {return SocialCalc.RenderColGroup(this);};
+SocialCalc.RenderContext.prototype.RenderColHeaders = function() {return SocialCalc.RenderColHeaders(this);};
+SocialCalc.RenderContext.prototype.RenderSizingRow = function() {return SocialCalc.RenderSizingRow(this);};
+SocialCalc.RenderContext.prototype.RenderRow = function(rownum, rowpane, linkstyle) {return SocialCalc.RenderRow(this, rownum, rowpane, linkstyle);};
+SocialCalc.RenderContext.prototype.RenderSpacingRow = function() {return SocialCalc.RenderSpacingRow(this);};
+SocialCalc.RenderContext.prototype.RenderCell = function(rownum, colnum, rowpane, colpane, noElement, linkstyle)
+      {return SocialCalc.RenderCell(this, rownum, colnum, rowpane, colpane, noElement, linkstyle);};
+
+// Functions:
+
+SocialCalc.PrecomputeSheetFonts = function(context) {
+
+   var defaultfont, parts, num, s;
+   var sheetobj = context.sheetobj;
+   var attribs =  sheetobj.attribs;
+
+   if (attribs.defaultfont) {
+      defaultfont = sheetobj.fonts[attribs.defaultfont];
+      defaultfont = defaultfont.replace(/^\*/,SocialCalc.defaultvalues.defaultfontstyle);
+      defaultfont = defaultfont.replace(/(.+)\*(.+)/,"$1"+SocialCalc.defaultvalues.defaultfontsize+"$2");
+      defaultfont = defaultfont.replace(/\*$/,SocialCalc.defaultvalues.defaultfontfamily);
+      parts=defaultfont.match(/^(\S+? \S+?) (\S+?) (\S.*)$/);
+      context.defaultfontstyle = parts[1];
+      context.defaultfontsize = parts[2];
+      context.defaultfontfamily = parts[3];
+      }
+
+   for (num=1; num<sheetobj.fonts.length; num++) { // precompute fonts by filling in the *'s
+      s=sheetobj.fonts[num];
+      s=s.replace(/^\*/,context.defaultfontstyle);
+      s=s.replace(/(.+)\*(.+)/,"$1"+context.defaultfontsize+"$2");
+      s=s.replace(/\*$/,context.defaultfontfamily);
+      parts=s.match(/^(\S+?) (\S+?) (\S+?) (\S.*)$/);
+      context.fonts[num] = {style: parts[1], weight: parts[2], size: parts[3], family: parts[4]};
+
+      }
+   }
+
+SocialCalc.CalculateCellSkipData = function(context) {
+
+   var row, col, coord, cell, contextcell, colspan, rowspan, skiprow, skipcol, skipcoord;
+
+   var sheetobj=context.sheetobj;
+   var sheetrowattribs=sheetobj.rowattribs;
+   var sheetcolattribs=sheetobj.colattribs;
+   context.maxrow=0;
+   context.maxcol=0;
+   context.cellskip = {}; // reset
+
+   // Calculate cellskip data
+
+   for (row=1; row<=sheetobj.attribs.lastrow; row++) {
+      for (col=1; col<=sheetobj.attribs.lastcol; col++) { // look for spans and set cellskip for skipped cells
+         coord=SocialCalc.crToCoord(col, row);
+         cell=sheetobj.cells[coord];
+         // don't look at undefined cells (they have no spans) or skipped cells
+         if (cell===undefined || context.cellskip[coord]) continue;
+         colspan=cell.colspan || 1;
+         rowspan=cell.rowspan || 1;
+         if (colspan>1 || rowspan>1) {
+            for (skiprow=row; skiprow<row+rowspan; skiprow++) {
+               for (skipcol=col; skipcol<col+colspan; skipcol++) { // do the setting on individual cells
+                  skipcoord=SocialCalc.crToCoord(skipcol,skiprow);
+                  if (skipcoord==coord) { // for coord, remember row and col
+                     context.coordToCR[coord]={row: row, col: col};
+                     }
+                  else { // for other cells, flag with coord of here
+                     context.cellskip[skipcoord]=coord;
+                     }
+                  if (skiprow>context.maxrow) maxrow=skiprow;
+                  if (skipcol>context.maxcol) maxcol=skipcol;
+                  }
+               }
+            }
+         }
+      }
+   }
+
+SocialCalc.CalculateColWidthData = function(context) {
+
+   var colnum, colname, colwidth, totalwidth;
+
+   var sheetobj=context.sheetobj;
+   var sheetcolattribs=sheetobj.colattribs;
+
+   // Calculate column width data
+
+   totalwidth=context.showRCHeaders ? context.rownamewidth-0 : 0;
+   for (colpane=0; colpane<context.colpanes.length; colpane++) {
+      for (colnum=context.colpanes[colpane].first; colnum<=context.colpanes[colpane].last; colnum++) {
+         colname=SocialCalc.rcColname(colnum);
+         colwidth = sheetobj.colattribs.width[colname] || sheetobj.attribs.defaultcolwidth || SocialCalc.defaultvalues.defaultcolwidth;
+         if (colwidth=="blank" || colwidth=="auto") colwidth="";
+         context.colwidth[colnum]=colwidth+"";
+         totalwidth+=colwidth ? (colwidth-0) : 10;
+         }
+      }
+   context.totalwidth = totalwidth;
+
+   }
+
+SocialCalc.InitializeTable = function(context, tableobj) {
+
+/*
+
+Uses border-collapse so corners don't have holes
+Note: IE and Firefox handle <col> differently (IE adds borders and padding)
+under border-collapse and Safari has problems with <col> and wide text
+Tablelayout "fixed" also leads to problems
+
+*/
+
+/*
+
+*** Discussion ***
+
+The rendering assumes fixed column widths, even though SocialCalc allows "auto".
+There may be issues with "auto" and it is hard to make it work cross-browser
+with border-collapse, etc.
+
+This and the RenderSheet routine are where in the code the specifics of
+table attributes and column size definitions are set. As the browsers settle down
+and when we decide if we don't need auto width, we may want to revisit the way the
+code does this (e.g., use table-layout:fixed).
+
+*/
+   tableobj.style.borderCollapse="collapse";
+   tableobj.cellSpacing="0";
+   tableobj.cellPadding="0";
+
+   tableobj.style.width=context.totalwidth+"px";
+
+   }
+
+SocialCalc.RenderSheet = function(context, oldtable, linkstyle) {
+
+   var newrow, rowpane;
+
+   var tableobj, colgroupobj, tbodyobj, parentnode;
+
+   tableobj=document.createElement("table");
+   context.InitializeTable(tableobj);
+
+   colgroupobj=context.RenderColGroup();
+   tableobj.appendChild(colgroupobj);
+
+   tbodyobj=document.createElement("tbody");
+
+   tbodyobj.appendChild(context.RenderSizingRow());
+
+   if (context.showRCHeaders) {
+      newrow=context.RenderColHeaders();
+      if (newrow) tbodyobj.appendChild(newrow);
+      }
+
+   for (rowpane=0; rowpane<context.rowpanes.length; rowpane++) {
+      for (rownum=context.rowpanes[rowpane].first;rownum<=context.rowpanes[rowpane].last;rownum++) {
+         newrow=context.RenderRow(rownum, rowpane, linkstyle);
+         tbodyobj.appendChild(newrow);
+         }
+      if (rowpane<context.rowpanes.length-1) {
+         newrow=context.RenderSpacingRow();
+         tbodyobj.appendChild(newrow);
+         }
+      }
+
+   tableobj.appendChild(tbodyobj);
+
+   if (oldtable) {
+      parentnode = oldtable.parentNode;
+      if (parentnode) parentnode.replaceChild(tableobj, oldtable);
+      }
+
+   return tableobj;
+
+   }
+
+SocialCalc.RenderRow = function(context, rownum, rowpane, linkstyle) {
+
+   var sheetobj=context.sheetobj;
+
+   var result=document.createElement("tr");
+   var colnum, newcol, colpane, newdiv;
+
+   if (context.showRCHeaders) {
+      newcol=document.createElement("td");
+      if (context.classnames) newcol.className=context.classnames.rowname;
+      if (context.explicitStyles) newcol.style.cssText=context.explicitStyles.rowname;
+      newcol.width=context.rownamewidth;
+      newcol.style.verticalAlign="top"; // to get around Safari making top of centered row number be
+                                        // considered top of row (and can't get <row> position in Safari)
+      newcol.innerHTML=rownum+"";
+      result.appendChild(newcol);
+      }
+
+   for (colpane=0; colpane<context.colpanes.length; colpane++) {
+      for (colnum=context.colpanes[colpane].first; colnum<=context.colpanes[colpane].last; colnum++) {
+         newcol=context.RenderCell(rownum, colnum, rowpane, colpane, null, linkstyle);
+         if (newcol) result.appendChild(newcol);
+         }
+      if (colpane<context.colpanes.length-1) {
+         newcol=document.createElement("td");
+         newcol.width=context.defaultpanedividerwidth;
+         if (context.classnames.panedivider) newcol.className=context.classnames.panedivider;
+         if (context.explicitStyles.panedivider) newcol.style.cssText=context.explicitStyles.panedivider;
+         newdiv=document.createElement("div"); // for Firefox to avoid squishing
+         newdiv.style.width=context.defaultpanedividerwidth+"px";
+         newdiv.style.overflow="hidden";
+         newcol.appendChild(newdiv);
+         result.appendChild(newcol);
+         }
+      }
+   return result;
+   }
+
+SocialCalc.RenderSpacingRow = function(context) {
+
+   var colnum, newcol, colpane, w;
+
+   var sheetobj=context.sheetobj;
+
+   var result=document.createElement("tr");
+
+   if (context.showRCHeaders) {
+      newcol=document.createElement("td");
+      newcol.width=context.rownamewidth;
+      newcol.height=context.defaultpanedividerheight;
+      if (context.classnames.panedivider) newcol.className=context.classnames.panedivider;
+      if (context.explicitStyles.panedivider) newcol.style.cssText=context.explicitStyles.panedivider;
+      result.appendChild(newcol);
+      }
+
+   for (colpane=0; colpane<context.colpanes.length; colpane++) {
+      for (colnum=context.colpanes[colpane].first; colnum<=context.colpanes[colpane].last; colnum++) {
+         newcol=document.createElement("td");
+         w = context.colwidth[colnum];
+         if (w) newcol.width=w;
+         newcol.height=context.defaultpanedividerheight;
+         if (context.classnames.panedivider) newcol.className=context.classnames.panedivider;
+         if (context.explicitStyles.panedivider) newcol.style.cssText=context.explicitStyles.panedivider;
+         if (newcol) result.appendChild(newcol);
+         }
+      if (colpane<context.colpanes.length-1) {
+         newcol=document.createElement("td");
+         newcol.width=context.defaultpanedividerwidth;
+         newcol.height=context.defaultpanedividerheight;
+         if (context.classnames.panedivider) newcol.className=context.classnames.panedivider;
+         if (context.explicitStyles.panedivider) newcol.style.cssText=context.explicitStyles.panedivider;
+         result.appendChild(newcol);
+         }
+      }
+   return result;
+   }
+
+SocialCalc.RenderColHeaders = function(context) {
+
+   var sheetobj=context.sheetobj;
+
+   var result=document.createElement("tr");
+   var colnum, newcol;
+
+   if (!context.showRCHeaders) return null;
+
+   newcol=document.createElement("td");
+   if (context.classnames) newcol.className=context.classnames.upperleft;
+   if (context.explicitStyles) newcol.style.cssText=context.explicitStyles.upperleft;
+   newcol.width=context.rownamewidth;
+   result.appendChild(newcol);
+
+   for (colpane=0; colpane<context.colpanes.length; colpane++) {
+      for (colnum=context.colpanes[colpane].first; colnum<=context.colpanes[colpane].last; colnum++) {
+         newcol=document.createElement("td");
+         if (context.classnames) newcol.className=context.classnames.colname;
+         if (context.explicitStyles) newcol.style.cssText=context.explicitStyles.colname;
+         newcol.innerHTML=SocialCalc.rcColname(colnum);
+         result.appendChild(newcol);
+         }
+      if (colpane<context.colpanes.length-1) {
+         newcol=document.createElement("td");
+         newcol.width=context.defaultpanedividerwidth;
+         if (context.classnames.panedivider) newcol.className=context.classnames.panedivider;
+         if (context.explicitStyles.panedivider) newcol.style.cssText=context.explicitStyles.panedivider;
+         result.appendChild(newcol);
+         }
+      }
+   return result;
+   }
+
+SocialCalc.RenderColGroup = function(context) {
+
+   var colpane, colnum, newcol, t;
+   var sheetobj=context.sheetobj;
+
+   var result=document.createElement("colgroup");
+
+   if (context.showRCHeaders) {
+      newcol=document.createElement("col");
+      newcol.width=context.rownamewidth;
+      result.appendChild(newcol);
+      }
+
+   for (colpane=0; colpane<context.colpanes.length; colpane++) {
+      for (colnum=context.colpanes[colpane].first; colnum<=context.colpanes[colpane].last; colnum++) {
+         newcol=document.createElement("col");
+         t = context.colwidth[colnum];
+         if (t) newcol.width=t;
+         result.appendChild(newcol);
+         }
+      if (colpane<context.colpanes.length-1) {
+         newcol=document.createElement("col");
+         newcol.width=context.defaultpanedividerwidth;
+         result.appendChild(newcol);
+         }
+      }
+   return result;
+   }
+
+SocialCalc.RenderSizingRow = function(context) {
+
+   var colpane, colnum, newcell, t;
+   var sheetobj=context.sheetobj;
+
+   var result=document.createElement("tr");
+
+   if (context.showRCHeaders) {
+      newcell=document.createElement("td");
+      newcell.style.width=context.rownamewidth+"px";
+      newcell.height="1";
+      result.appendChild(newcell);
+      }
+
+   for (colpane=0; colpane<context.colpanes.length; colpane++) {
+      for (colnum=context.colpanes[colpane].first; colnum<=context.colpanes[colpane].last; colnum++) {
+         newcell=document.createElement("td");
+         t = context.colwidth[colnum];
+         if (t) newcell.width=t;
+         newcell.height="1";
+         result.appendChild(newcell);
+         }
+      if (colpane<context.colpanes.length-1) {
+         newcell=document.createElement("td");
+         newcell.width=context.defaultpanedividerwidth;
+         newcell.height="1";
+         result.appendChild(newcell);
+         }
+      }
+   return result;
+   }
+
+SocialCalc.RenderCell = function(context, rownum, colnum, rowpane, colpane, noElement, linkstyle) {
+
+   var sheetobj=context.sheetobj;
+
+   var num, t, result, span, stylename, cell, sheetattribs, scdefaults;
+   var stylestr="";
+
+   rownum = rownum-0; // make sure a number
+   colnum = colnum-0;
+
+   var coord=SocialCalc.crToCoord(colnum, rownum);
+
+   if (context.cellskip[coord]) { // skip if within a span
+      if (context.CoordInPane(context.cellskip[coord], rowpane, colpane)) {
+         return null; // span starts in this pane -- so just skip
+         }
+      result=noElement ? SocialCalc.CreatePseudoElement() : document.createElement("td"); // span start is scrolled away, so make a special cell
+      if (context.classnames.skippedcell) result.className=context.classnames.skippedcell;
+      if (context.explicitStyles.skippedcell) result.style.cssText=context.explicitStyles.skippedcell;
+      result.innerHTML="&nbsp;"; // put something there so height is OK
+      // !!! Really need to add borders in case there isn't anything else shown in the pane to get height
+      return result;
+      }
+
+   result=noElement ? SocialCalc.CreatePseudoElement() : document.createElement("td");
+
+   if (context.cellIDprefix) {
+      result.id = context.cellIDprefix+coord;
+      }
+
+   cell=sheetobj.cells[coord];
+
+   if (!cell) {
+      cell=new SocialCalc.Cell(coord);
+      }
+
+   sheetattribs=sheetobj.attribs;
+   scdefaults=SocialCalc.defaultvalues;
+
+   if (cell.colspan>1) {
+      span=1;
+      for (num=1; num<cell.colspan; num++) {
+          if (sheetobj.colattribs.hide[SocialCalc.rcColname(colnum+num)]!="yes" &&
+                context.CellInPane(rownum, colnum+num, rowpane, colpane)) {
+             span++;
+             }
+          }
+      result.colSpan=span;
+      }
+
+   if (cell.rowspan>1) {
+      span=1;
+      for (num=1; num<cell.rowspan; num++) {
+          if (sheetobj.rowattribs.hide[(rownum+num)+""]!="yes" &&
+                context.CellInPane(rownum+num, colnum, rowpane, colpane))
+             span++;
+         }
+      result.rowSpan=span;
+      }
+
+   if (cell.displaystring==undefined) { // cache the display value
+      cell.displaystring = SocialCalc.FormatValueForDisplay(sheetobj, cell.datavalue, coord, linkstyle);
+      }
+   result.innerHTML = cell.displaystring;
+
+   num=cell.layout || sheetattribs.defaultlayout;
+   if (num) {
+      stylestr+=sheetobj.layouts[num];
+      }
+   else {
+      stylestr+=SocialCalc.defaultvalues.defaultlayout;
+      }
+
+   num=cell.font || sheetattribs.defaultfont;
+   if (num) { // get expanded font strings in context
+      t = context.fonts[num]; // do each - plain "font:" style sets all sorts of other values, too (Safari font-stretch problem on cssText)
+      stylestr+="font-style:"+t.style+";font-weight:"+t.weight+";font-size:"+t.size+";font-family:"+t.family+";";
+      }
+
+   num=cell.color || sheetattribs.defaultcolor;
+   if (num) stylestr+="color:"+sheetobj.colors[num]+";";
+
+   num=cell.bgcolor || sheetattribs.defaultbgcolor;
+   if (num) stylestr+="background-color:"+sheetobj.colors[num]+";";
+
+   num=cell.cellformat;
+   if (num) {
+      stylestr+="text-align:"+sheetobj.cellformats[num]+";";
+      }
+   else {
+      t=cell.valuetype.charAt(0);
+      if (t=="t") {
+         num=sheetattribs.defaulttextformat;
+         if (num) stylestr+="text-align:"+sheetobj.cellformats[num]+";";
+         }
+      else if (t="n") {
+         num=sheetattribs.defaultnontextformat;
+         if (num) {
+            stylestr+="text-align:"+sheetobj.cellformats[num]+";";
+            }
+         else {
+            stylestr+="text-align:right;";
+            }
+         }
+      else stylestr+="text-align:left;";
+      }
+
+   num=cell.bt;
+   if (num) stylestr+="border-top:"+sheetobj.borderstyles[num]+";";
+
+   num=cell.br;
+   if (num) stylestr+="border-right:"+sheetobj.borderstyles[num]+";";
+   else if (context.showGrid) {
+      if (context.CellInPane(rownum, colnum+1, rowpane, colpane))
+         t=SocialCalc.crToCoord(colnum+1, rownum);
+      else t="nomatch";
+      if (context.cellskip[t]) t=context.cellskip[t];
+      if (!sheetobj.cells[t] || !sheetobj.cells[t].bl)
+         stylestr+="border-right:"+context.gridCSS;
+      }
+
+   num=cell.bb;
+   if (num) stylestr+="border-bottom:"+sheetobj.borderstyles[num]+";";
+   else if (context.showGrid) {
+      if (context.CellInPane(rownum+1, colnum, rowpane, colpane))
+         t=SocialCalc.crToCoord(colnum, rownum+1);
+      else t="nomatch";
+      if (context.cellskip[t]) t=context.cellskip[t];
+      if (!sheetobj.cells[t] || !sheetobj.cells[t].bt)
+         stylestr+="border-bottom:"+context.gridCSS;
+      }
+
+   num=cell.bl;
+   if (num) stylestr+="border-left:"+sheetobj.borderstyles[num]+";";
+
+   if (cell.comment) stylestr+="background-repeat:no-repeat;background-position:top right;background-image:url(images/sc-commentbg.gif);";
+
+   result.style.cssText=stylestr;
+
+   //!!!!!!!!!
+   // NOTE: csss and cssc are not supported yet.
+   // csss needs to be parsed into pieces to override just the attributes specified, not all with assignment to cssText.
+   // cssc just needs to set the className.
+
+   if (context.highlights[coord]) { // this is a highlit cell: Override style appropriately
+      t = context.highlightTypes[context.highlights[coord]]; // get type definition
+      for (stylename in t) {
+         result.style[stylename] = t[stylename];
+         }
+      }
+
+   return result;
+   }
+
+SocialCalc.CoordInPane = function(context, coord, rowpane, colpane) {
+   var coordToCR = context.coordToCR[coord];
+   if (!coordToCR || !coordToCR.row || !coordToCR.col) throw "Bad coordToCR for "+coord;
+   return context.CellInPane(coordToCR.row, coordToCR.col, rowpane, colpane);
+   }
+
+
+SocialCalc.CellInPane = function(context, row, col, rowpane, colpane) {
+   var panerowlimits = context.rowpanes[rowpane];
+   var panecollimits = context.colpanes[colpane];
+   if (!panerowlimits || !panecollimits) throw "CellInPane called with unknown panes "+rowpane+"/"+colpane;
+   if (row < panerowlimits.first || row > panerowlimits.last) return false;
+   if (col < panecollimits.first || col > panecollimits.last) return false;
+   return true;
+   }
+
+SocialCalc.CreatePseudoElement = function() {
+   return {style:{cssText:""}, innerHTML: "", className: ""};
+   }
+
+
+// *************************************
+//
+// Misc. functions:
+//
+// *************************************
+
+SocialCalc.rcColname = function(c) {
+   if (c > 702) c = 702; // maximum number of columns - ZZ
+   var collow = (c - 1) % 26 + 65;
+   var colhigh = Math.floor((c - 1) / 26);
+   if (colhigh)
+      return String.fromCharCode(colhigh + 64) + String.fromCharCode(collow);
+   else
+      return String.fromCharCode(collow);
+   }
+
+SocialCalc.letters = ["A","B","C","D","E","F","G","H","I","J","K","L","M",
+                      "N","O","P","Q","R","S","T","U","V","W","X","Y","Z"];
+
+SocialCalc.crToCoord = function(c, r) {
+   var result;
+   if (c < 1) c = 1;
+   if (c > 702) c = 702; // maximum number of columns - ZZ
+   if (r < 1) r = 1;
+   var collow = (c - 1) % 26;
+   var colhigh = Math.floor((c - 1) / 26);
+   if (colhigh)
+      result = SocialCalc.letters[colhigh-1] + SocialCalc.letters[collow] + r;
+   else
+      result = SocialCalc.letters[collow] + r;
+   return result;
+   }
+
+SocialCalc.coordToCol = {}; // too expensive to set in crToCoord since that is called so many times
+SocialCalc.coordToRow = {};
+
+SocialCalc.coordToCr = function(cr) {
+   var c, i, ch;
+   var r = SocialCalc.coordToRow[cr];
+   if (r) return {row: r, col: SocialCalc.coordToCol[cr]};
+   c=0;r=0;
+   for (i=0; i<cr.length; i++) { // this was faster than using regexes; assumes well-formed
+      ch = cr.charCodeAt(i);
+      if (ch==36) ; // skip $'s
+      else if (ch<=57) r = 10*r + ch-48;
+      else if (ch>=97) c = 26*c + ch-96;
+      else if (ch>=65) c = 26*c + ch-64;
+      }
+   SocialCalc.coordToCol[cr] = c;
+   SocialCalc.coordToRow[cr] = r;
+   return {row: r, col: c};
+
+   }
+
+SocialCalc.ParseRange = function(range) {
+   var pos, cr, cr1, cr2;
+   if (!range) range = "A1:A1"; // error return, hopefully benign
+   range = range.toUpperCase();
+   pos = range.indexOf(":");
+   if (pos>=0) {
+      cr = range.substring(0,pos);
+      cr1 = SocialCalc.coordToCr(cr);
+      cr1.coord = cr;
+      cr = range.substring(pos+1);
+      cr2 = SocialCalc.coordToCr(cr);
+      cr2.coord = cr;
+      }
+   else {
+      cr1 = SocialCalc.coordToCr(range);
+      cr1.coord = range;
+      cr2 = SocialCalc.coordToCr(range);
+      cr2.coord = range;
+      }
+   return {cr1: cr1, cr2: cr2};
+   }
+
+SocialCalc.decodeFromSave = function(s) {
+   if (typeof s != "string") return s;
+   if (s.indexOf("\\")==-1) return s; // for performace reasons: replace nothing takes up time
+   var r=s.replace(/\\c/g,":");
+   r=r.replace(/\\n/g,"\n");
+   return r.replace(/\\b/g,"\\");
+   }
+
+SocialCalc.decodeFromAjax = function(s) {
+   if (typeof s != "string") return s;
+   if (s.indexOf("\\")==-1) return s; // for performace reasons: replace nothing takes up time
+   var r=s.replace(/\\c/g,":");
+   r=r.replace(/\\n/g,"\n");
+   r=r.replace(/\\e/g,"]]");
+   return r.replace(/\\b/g,"\\");
+   }
+
+SocialCalc.encodeForSave = function(s) {
+   if (typeof s != "string") return s;
+   if (s.indexOf("\\")!=-1) // for performace reasons: replace nothing takes up time
+      s=s.replace(/\\/g,"\\b");
+   if (s.indexOf(":")!=-1)
+      s=s.replace(/:/g,"\\c");
+   if (s.indexOf("\n")!=-1)
+      s=s.replace(/\n/g,"\\n");
+   return s;
+   }
+
+//
+// Returns estring where &, <, >, " are HTML escaped
+// 
+SocialCalc.special_chars = function(string) {
+
+   if (/[&|<|>|"]/.test(string)) { // only do "slow" replaces if something to replace
+      string = string.replace(/&/g, "&amp;");
+      string = string.replace(/</g, "&lt;");
+      string = string.replace(/>/g, "&gt;");
+      string = string.replace(/"/g, "&quot;");
+      }
+   return string;
+
+   }
+
+SocialCalc.Lookup = function(value, list) {
+
+   for (i=0; i<list.length; i++) {
+      if (list[i] > value) {
+         if (i>0) return i-1;
+         else return null;
+         }
+      }
+   return list.length-1; // if all smaller, matches last
+
+   }
+
+//
+// setStyles(element, cssText)
+//
+// Takes a pseudo style string (e.g., text-align must be textAlign) and sets
+// the element's style value for each style name listed (leaving others unchanged).
+// OK to call with null cssText.
+//
+
+SocialCalc.setStyles = function (element, cssText) {
+
+   var parts, part, namevalue;
+
+   if (!cssText) return;
+
+   parts = cssText.split(";");
+   for (part=0; part<parts.length; part++) {
+      namevalue = parts[part].split(":");
+      if (namevalue[0]) element.style[namevalue[0]] = namevalue[1];
+      }
+
+   }
+
+//
+// GetViewportInfo() - returns object with viewport width and height, and scroll offsets
+//
+// Flanagan, JavaScript, 5th Edition, page 276
+//
+
+SocialCalc.GetViewportInfo = function () {
+
+   var result = {};
+
+   if (window.innerWidth) { // all but IE
+      result.width = window.innerWidth;
+      result.height = window.innerHeight;
+      result.horizontalScroll = window.pageXOffset;
+      result.verticalScroll = window.pageYOffset;
+      }
+   else {
+      if (document.documentElement && document.documentElement.clientWidth) {
+         result.width = document.documentElement.clientWidth;
+         result.height = document.documentElement.clientHeight;
+         result.horizontalScroll = document.documentElement.scrollLeft;
+         result.verticalScroll = document.documentElement.scrollTop;
+         }
+      else if (document.body.clientWidth) {
+         result.width = document.body.clientWidth;
+         result.height = document.body.clientHeight;
+         result.horizontalScroll = document.body.scrollLeft;
+         result.verticalScroll = document.body.scrollTop;
+         }
+      }
+
+   return result;
+   }
+
+//
+// GetElementPosition(element) - returns object with left and top position of the element in the document
+//
+// Goodman's JavaScript & DHTML Cookbook, 2nd Edition, page 415
+//
+
+SocialCalc.GetElementPosition = function (element) {
+
+   var offsetLeft = 0;
+   var offsetTop = 0;
+   while (element) {
+      offsetLeft+=element.offsetLeft;
+      offsetTop+=element.offsetTop;
+      element=element.offsetParent;
+      }
+   return {left:offsetLeft, top:offsetTop};
+
+   }
+
+//
+// LookupElement(element, array) - returns array element which is an object with "element" of element
+//
+
+SocialCalc.LookupElement = function (element, array) {
+
+   var i;
+   for (i=0; i<array.length; i++) {
+      if (array[i].element == element) return array[i];
+      }
+   return null;
+
+   }
+
+//
+// Routines translated from the SocialCalc 1.1.0 Perl code:
+//
+// (Makes use of the FormatNumber JavaScript code translated from the Perl.)
+//
+
+//
+// displayvalue = FormatValueForDisplay(sheetobj, value, cr, linkstyle)
+//
+// Returns a string, in HTML, for the contents of a cell.
+//
+// The value is a either numeric or text, the cr is the coord of the cell
+// (its cell properties are used to determine formatting), and linkstyle
+// is a value passed to wiki-text expansion routines specifying the
+// purpose of the rendering so, for example, links can be rendered differently
+// during edit than with plain HTML.
+//
+
+SocialCalc.FormatValueForDisplay = function(sheetobj, value, cr, linkstyle) {
+
+   var valueformat, has_parens, has_commas, valuetype, valuesubtype;
+   var displayvalue;
+
+   var sheetattribs=sheetobj.attribs;
+   var scdefaults=SocialCalc.defaultvalues;
+
+   var cell=sheetobj.cells[cr];
+
+   if (!cell) { // get an empty cell if not there
+      cell=new SocialCalc.Cell(cr);
+      }
+
+   displayvalue = value;
+
+   valuetype = cell.valuetype || ""; // get type of value to determine formatting
+   valuesubtype = valuetype.substring(1);
+   valuetype = valuetype.charAt(0);
+
+   if (cell.errors || valuetype=="e") {
+      displayvalue = (cell.errors && SocialCalc.defaultvalues.expand_markup && SocialCalc.defaultvalues.expand_markup(cell.errors, sheetobj, linkstyle)) ||
+                        valuesubtype || "Error in cell";
+      return displayvalue;
+      }
+
+   if (valuetype=="t") {
+      valueformat = sheetobj.valueformats[cell.textvalueformat-0] || sheetobj.valueformats[sheetattribs.defaulttextvalueformat-0] || "";
+      if (valueformat=="formula") {
+         if (cell.datatype=="f") {
+            displayvalue = SocialCalc.special_chars("="+cell.formula) || "&nbsp;";
+            }
+         else if (cell.datatype=="c") {
+            displayvalue = SocialCalc.special_chars("'"+cell.formula) || "&nbsp;";
+            }
+         else {
+            displayvalue = SocialCalc.special_chars("'"+displayvalue) || "&nbsp;";
+            }
+         return displayvalue;
+         }
+      displayvalue = SocialCalc.format_text_for_display(displayvalue, cell.valuetype, valueformat, sheetobj, linkstyle);
+      }
+
+   else if (valuetype=="n") {
+      valueformat = cell.nontextvalueformat;
+      if (valueformat==null || valueformat=="") { //
+         valueformat = sheetattribs.defaultnontextvalueformat;
+         }
+      valueformat = sheetobj.valueformats[valueformat-0];
+      if (valueformat==null || valueformat=="none") {
+         valueformat = "";
+         }
+      if (valueformat=="formula") {
+         if (cell.datatype=="f") {
+            displayvalue = SocialCalc.special_chars("="+cell.formula) || "&nbsp;";
+            }
+         else if (cell.datatype=="c") {
+            displayvalue = SocialCalc.special_chars("'"+cell.formula) || "&nbsp;";
+            }
+         else {
+            displayvalue = SocialCalc.special_chars("'"+displayvalue) || "&nbsp;";
+            }
+         return displayvalue;
+         }
+      else if (valueformat=="forcetext") {
+         if (cell.datatype=="f") {
+            displayvalue = SocialCalc.special_chars("="+cell.formula) || "&nbsp;";
+            }
+         else if (cell.datatype=="c") {
+            displayvalue = SocialCalc.special_chars(cell.formula) || "&nbsp;";
+            }
+         else {
+            displayvalue = SocialCalc.special_chars(displayvalue) || "&nbsp;";
+            }
+         return displayvalue;
+         }
+
+      displayvalue = SocialCalc.format_number_for_display(displayvalue, cell.valuetype, valueformat);
+
+      }
+   else { // unknown type - probably blank
+      displayvalue = "&nbsp;";
+      }
+
+   return displayvalue;
+
+   }
+
+
+//
+// displayvalue = format_text_for_display(rawvalue, valuetype, valueformat, sheetobj, linkstyle)
+//
+
+SocialCalc.format_text_for_display = function(rawvalue, valuetype, valueformat, sheetobj, linkstyle) {
+
+   var valueformat, valuesubtype, dvsc, dvue, textval;
+   var displayvalue;
+
+   valuesubtype = valuetype.substring(1);
+
+   displayvalue = rawvalue;
+
+   if (valueformat=="none" || valueformat==null) valueformat="";
+   if (!/^(text-|custom|hidden)/.test(valueformat)) valueformat="";
+   if (valueformat=="" || valueformat=="General") { // determine format from type
+      if (valuesubtype=="h") valueformat="text-html";
+      if (valuesubtype=="w") valueformat="text-wiki";
+      if (!valuesubtype) valueformat="text-plain";
+      }
+   if (valueformat=="text-html") { // HTML - output as it as is
+      ;
+      }
+   else if (valueformat=="text-wiki") { // wiki text
+      displayvalue = (SocialCalc.defaultvalues.expand_markup
+                      && SocialCalc.defaultvalues.expand_markup(displayvalue, sheetobj, linkstyle)) || // do wiki markup
+                     SocialCalc.special_chars("wiki-text:"+displayvalue);
+      }
+   else if (valueformat=="text-url") { // text is a URL for a link
+      dvsc = SocialCalc.special_chars(displayvalue);
+      dvue = encodeURI(displayvalue);
+      displayvalue = '<a href="'+dvue+'">'+dvsc+'</a>';
+      }
+   else if (valueformat=="text-link") { // text is a URL for a link shown as Link
+      dvsc = SocialCalc.special_chars(displayvalue);
+      dvue = encodeURI(displayvalue);
+      displayvalue = '<a href="'+dvue+'">'+SocialCalc.defaultvalues.linkformatstring+'</a>';
+      }
+   else if (valueformat=="text-image") { // text is a URL for an image
+      dvue = encodeURI(displayvalue);
+      displayvalue = '<img src="'+dvue+'">';
+      }
+   else if (valueformat.substring(0,12)=="text-custom:") { // construct a custom text format: @r = text raw, @s = special chars, @u = url encoded
+       dvsc = SocialCalc.special_chars(displayvalue); // do special chars
+      dvsc = dvsc.replace(/  /g, "&nbsp; "); // keep multiple spaces
+      dvsc = dvsc.replace(/\n/g, "<br>");  // keep line breaks
+      dvue = encodeURI(displayvalue);
+      textval={};
+      textval.r = displayvalue;
+      textval.s = dvsc;
+      textval.u = dvue;
+      displayvalue = valueformat.substring(12); // remove "text-custom:"
+      displayvalue = displayvalue.replace(/@(r|s|u)/g, function(c){return textval[c];}); // replace placeholders
+      }
+   else if (valueformat.substring(0,6)=="custom") { // custom
+      displayvalue = SocialCalc.special_chars(displayvalue); // do special chars
+      displayvalue = displayvalue.replace(/  /g, "&nbsp; "); // keep multiple spaces
+      displayvalue = displayvalue.replace(/\n/g, "<br>"); // keep line breaks
+      displayvalue += " (custom format)";
+      }
+   else if (valueformat=="hidden") {
+      displayvalue = "&nbsp;";
+      }
+   else { // plain text
+      displayvalue = SocialCalc.special_chars(displayvalue); // do special chars
+      displayvalue = displayvalue.replace(/  /g, "&nbsp; "); // keep multiple spaces
+      displayvalue = displayvalue.replace(/\n/g, "<br>"); // keep line breaks
+      }
+
+   return displayvalue;
+
+   }
+
+
+//
+// displayvalue = format_number_for_display(rawvalue, valuetype, valueformat)
+//
+
+SocialCalc.format_number_for_display = function(rawvalue, valuetype, valueformat) {
+
+   var value, valuesubtype;
+
+   value = rawvalue-0;
+
+   valuesubtype = valuetype.substring(1);
+
+   if (valueformat=="Auto" || valueformat=="") { // cases with default format
+      if (valuesubtype=="%") { // will display a % character
+         valueformat = "#,##0.0%";
+         }
+      else if (valuesubtype=='$') {
+         valueformat = '[$]#,##0.00';
+         }
+      else if (valuesubtype=='dt') {
+         valueformat = SocialCalc.defaultvalues.defaultformatdt;
+         }
+      else if (valuesubtype=='d') {
+         valueformat = SocialCalc.defaultvalues.defaultformatd;
+         }
+      else if (valuesubtype=='t') {
+         valueformat = SocialCalc.defaultvalues.defaultformatt;
+         }
+      else if (valuesubtype=='l') {
+         valueformat = 'logical';
+         }
+      else {
+         valueformat = "General";
+         }
+      }
+
+   if (valueformat=="logical") { // do logical format
+      return value ? SocialCalc.defaultvalues.displaytrue : SocialCalc.defaultvalues.displayfalse;
+      }
+
+   if (valueformat=="hidden") { // do hidden format
+      return "&nbsp;";
+      }
+
+   // Use format
+
+   return SocialCalc.FormatNumber.formatNumberWithFormat(rawvalue, valueformat, "");
+
+   }
+
+//
+// valueinfo = DetermineValueType(rawvalue)
+//
+// Takes a value and looks for special formatting like $, %, numbers, etc.
+// Returns the value as a number or string and the type as {value: value, type: type}.
+// Tries to follow the spec for spreadsheet function VALUE(v).
+//
+
+SocialCalc.DetermineValueType = function(rawvalue) {
+
+   var value = rawvalue + "";
+   var type = "t";
+   var tvalue, matches, year, hour, minute, second, denom, num, intgr, constr;
+
+   tvalue = value.replace(/^\s+/, ""); // remove leading and trailing blanks
+   tvalue = tvalue.replace(/\s+$/, "");
+
+   if (value.length==0) {
+      type = "";
+      }
+   else if (value.match(/^\s+$/)) { // just blanks
+      ; // leave type "t"
+      }
+   else if (tvalue.match(/^[-+]?\d*(?:\.)?\d*(?:[eE][-+]?\d+)?$/)) { // general number, including E
+      value = tvalue - 0; // try converting to number
+      type = "n";
+      }
+   else if (tvalue.match(/^[-+]?\d*(?:\.)?\d*\s*%$/)) { // percent form: 15.1%
+      value = (tvalue.slice(0, -1) - 0) / 100; // convert and scale
+      type = "n%";
+      }
+   else if (tvalue.match(/^[-+]?\$\s*\d*(?:\.)?\d*\s*$/) && tvalue.match(/\d/)) { // $ format: $1.49
+      value = tvalue.replace(/\$/, "") - 0;
+      type = "n$";
+      }
+   else if (tvalue.match(/^[-+]?(\d*,\d*)+(?:\.)?\d*$/)) { // number format ignoring commas: 1,234.49
+      value = tvalue.replace(/,/, "") - 0;
+      type = "n";
+      }
+   else if (tvalue.match(/^[-+]?(\d*,\d*)+(?:\.)?\d*\s*%$/)) { // % with commas: 1,234.49%
+      value = (tvalue.replace(/[%,]/g, "") - 0) / 100;
+      type = "n%";
+      }
+   else if (tvalue.match(/^[-+]?\$\s*(\d*,\d*)+(?:\.)?\d*$/) && tvalue.match(/\d/)) { // $ and commas: $1,234.49
+      value = tvalue.replace(/[\$,]/g, "") - 0;
+      type = "n$";
+      }
+   else if (matches=value.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{1,4})\s*$/)) { // MM/DD/YYYY, MM/DD/YYYY
+      year = matches[3] - 0;
+      year = year < 1000 ? year + 2000 : year;
+      value = SocialCalc.FormatNumber.convert_date_gregorian_to_julian(year, matches[1]-0, matches[2]-0)-2415019;
+      type = "nd";
+      }
+   else if (matches=value.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})\s*$/)) { // YYYY-MM-DD, YYYY/MM/DD
+      year = matches[1]-0;
+      year = year < 1000 ? year + 2000 : year;
+      value = SocialCalc.FormatNumber.convert_date_gregorian_to_julian(year, matches[2]-0, matches[3]-0)-2415019;
+      type = "nd";
+      }
+   else if (matches=value.match(/^(\d{1,2}):(\d{1,2})\s*$/)) { // HH:MM
+      hour = matches[1]-0;
+      minute = matches[2]-0;
+      if (hour < 24 && minute < 60) {
+         value = hour/24 + minute/(24*60);
+         type = "nt";
+         }
+      }
+   else if (matches=value.match(/^(\d{1,2}):(\d{1,2}):(\d{1,2})\s*$/)) { // HH:MM:SS
+      hour = matches[1]-0;
+      minute = matches[2]-0;
+      second = matches[3]-0;
+      if (hour < 24 && minute < 60 && second < 60) {
+         value = hour/24 + minute/(24*60) + second/(24*60*60);
+         type = "nt";
+         }
+      }
+   else if (matches=value.match(/^\s*([-+]?\d+) (\d+)\/(\d+)\s*$/)) { // 1 1/2
+      intgr = matches[1]-0;
+      num = matches[2]-0;
+      denom = matches[3]-0;
+      if (denom > 0) {
+         value = intgr + num/denom;
+         type = "n";
+         }
+      }
+   else if (constr=SocialCalc.InputConstants[value.toUpperCase()]) { // special constants, like "false" and #N/A
+      num = constr.indexOf(",");
+      value = constr.substring(0,num)-0;
+      type = constr.substring(num+1);
+      }
+
+   return {value: value, type: type};
+
+   }
+
+SocialCalc.InputConstants = { // strings that turn into constants for SocialCalc.DetermineValueType
+      "TRUE": "1,nl", "FALSE": "0,nl", "#N/A": "0,e#N/A", "#NULL!": "0,e#NULL!", "#NUM!": "0,e#NUM!",
+      "#DIV/0!": "0,e#DIV/0!", "#VALUE!": "0,e#VALUE!", "#REF!": "0,e#REF!", "#NAME?": "0,e#NAME?"};
+
+//
+// result = default_expand_markup(displayvalue, sheetobj, linkstyle)
+//
+// Processes wiki-text -- this is a placeholder.
+// Reference to here in SocialCalc.expand_markup should be replaced by application-specific routine.
+//
+
+SocialCalc.default_expand_markup = function(displayvalue, sheetobj, linkstyle) {
+
+   var result = displayvalue;
+
+   result = SocialCalc.special_chars(result); // do special chars
+   result = result.replace(/  /g, "&nbsp; "); // keep multiple spaces
+   result = result.replace(/\n/g, "<br>"); // keep line breaks
+   result = result.replace(/('*)'''(.*?)'''/g, "$1<b>$2<\/b>"); // Wiki-style bold/italics
+   result = result.replace(/''(.*?)''/g, "<i>$1<\/i>");
+
+   return result;
+
+   }
+
+//
+// result = SocialCalc.ConvertSaveToOtherFormat(savestr, outputformat)
+//
+// Returns a string in the specificed format: "scsave", "html", "csv", "tab" (tab delimited)
+//
+
+SocialCalc.ConvertSaveToOtherFormat = function(savestr, outputformat) {
+
+   var sheet, context, clipextents, div, ele, row, col, cr, cell, str;
+
+   var result = "";
+
+   if (outputformat == "scsave") {
+      return savestr;
+      }
+
+   if (savestr == "") {
+      return "";
+      }
+
+   sheet = new SocialCalc.Sheet();
+   sheet.ParseSheetSave(savestr);
+
+   if (sheet.copiedfrom) {
+      clipextents = SocialCalc.ParseRange(sheet.copiedfrom);
+      }
+   else {
+      clipextents = {cr1: {row: 1, col: 1}, cr2: {row: sheet.attribs.lastrow, col: sheet.attribs.lastcol}};
+      }
+
+   if (outputformat == "html") {
+      context=new SocialCalc.RenderContext(sheet);
+      if (sheet.copiedfrom) {
+         context.rowpanes[0] = {first: clipextents.cr1.row, last: clipextents.cr2.row};
+         context.colpanes[0] = {first: clipextents.cr1.col, last: clipextents.cr2.col};
+         }
+      context.CalculateCellSkipData();
+      context.CalculateColWidthData();
+      div = document.createElement("div");
+      ele = context.RenderSheet(null);
+      div.appendChild(ele);
+      delete context;
+      delete sheet;
+      result = div.innerHTML;
+      delete ele;
+      delete div;
+      return result;
+      }
+
+   for (row = clipextents.cr1.row; row <= clipextents.cr2.row; row++) {
+      for (col = clipextents.cr1.col; col <= clipextents.cr2.col; col++) {
+         cr = SocialCalc.crToCoord(col, row);
+         cell = sheet.GetAssuredCell(cr);
+
+         if (cell.errors) {
+            str = cell.errors;
+            }
+         else {
+            str = cell.datavalue+""; // get value as text
+            }
+
+         if (outputformat == "csv") {
+            if (str.indexOf('"')!=-1) {
+               str = str.replace(/"/g, '""'); // double quotes
+               }
+            if (/[, "]/.test(str)) { // note: doesn't handle embedded newlines specially!!! Just passes through.
+               str = '"' + str + '"'; // add quotes
+               }
+            if (col>clipextents.cr1.col) {
+               str = "," + str; // add commas
+               }
+            }
+         else if (outputformat == "tab") {
+            if (col>clipextents.cr1.col) { // note: doesn't handle embedded newlines specially!!! Just passes through.
+               str = "\t" + str; // add tabs
+               }
+            }
+         result += str;
+         }
+      result += "\n";
+      }
+
+   return result;
+
+   }
+
+
+//
+// result = SocialCalc.ConvertOtherFormatToSave(inputstr, inputformat)
+//
+// Returns a string converted from the specified format: "scsave", "csv", "tab" (tab delimited)
+//
+
+SocialCalc.ConvertOtherFormatToSave = function(inputstr, inputformat) {
+
+   var sheet, context, lines, i, line, value, inquote, j, ch, values, row, col, cr, maxc;
+
+   var result = "";
+
+   if (inputformat == "scsave") {
+      return inputstr;
+      }
+
+   sheet = new SocialCalc.Sheet();
+
+   lines = inputstr.split(/\r\n|\n/);
+
+   maxc = 0;
+
+   if (inputformat == "csv") {
+      row = 0;
+      for (i=0; i<lines.length; i++) {
+         if (i==lines.length-1 && lines[i]=="") { // extra null line - ignore
+            break;
+            }
+         line = lines[i]+","; // add one to the end
+         value = "";
+         inquote = false;
+         row++;
+         col = 0;
+         for (j=0; j<line.length; j++) {
+            ch = line.charAt(j);
+            if (ch == "," && !inquote) {
+               col++;
+               if (col>maxc) maxc = col;
+               cr = SocialCalc.crToCoord(col, row);
+               SocialCalc.SetConvertedCell(sheet, cr, value);
+               value = "";
+               }
+            else {
+               if (ch == '"') {
+                  if (inquote) {
+                     if (j<line.length-1 && line.charAt(j+1) == '"') { // double quotes
+                        j++; // skip the second one
+                        value += '"'; // add one quote
+                        }
+                     else {
+                        inquote = false;
+                        }
+                     }
+                  else {
+                     inquote = true;
+                     }
+                  }
+               else {
+                  value += ch;
+                  }
+               }
+            } // !! Does not handle newlines in quoted strings correctly
+         }
+      if (maxc>0) {
+         sheet.attribs.lastrow = row;
+         sheet.attribs.lastcol = maxc;
+         result = sheet.CreateSheetSave("A1:"+SocialCalc.crToCoord(maxc, row));
+         }
+      }
+
+   if (inputformat == "tab") {
+      row = 0;
+      for (i=0; i<lines.length; i++) {
+         if (i==lines.length-1 && lines[i]=="") { // extra null line - ignore
+            break;
+            }
+         values = lines[i].split("\t");
+         row++;
+         col = 0;
+         for (j=0; j<values.length; j++) {
+            col++;
+            if (col>maxc) maxc = col;
+            cr = SocialCalc.crToCoord(col, row);
+            SocialCalc.SetConvertedCell(sheet, cr, values[j]);
+            }
+         }
+      if (maxc>0) {
+         sheet.attribs.lastrow = row;
+         sheet.attribs.lastcol = maxc;
+         result = sheet.CreateSheetSave("A1:"+SocialCalc.crToCoord(maxc, row));
+         }
+      }
+
+   return result;
+
+   }
+
+//
+// SocialCalc.SetConvertedCell(sheet, cr, rawvalue)
+//
+// Sets the cell cr with a value and type determined from rawvalue
+//
+
+SocialCalc.SetConvertedCell = function(sheet, cr, rawvalue) {
+
+   var cell, value;
+
+   cell = sheet.GetAssuredCell(cr);
+
+   value = SocialCalc.DetermineValueType(rawvalue);
+
+   if (value.type == 'n' && value.value == rawvalue) { // check that we don't need "constant" to remember original value
+      cell.datatype = "v";
+      cell.valuetype = "n";
+      cell.datavalue = value.value;
+      }
+   else if (value.type == 't') { // normal text
+      cell.datatype = "t";
+      cell.valuetype = "t";
+      cell.datavalue = value.value;
+      }
+   else { // special number types
+      cell.datatype = "c";
+      cell.valuetype = value.type;
+      cell.datavalue = value.value;
+      cell.formula = rawvalue;
+      }
+
+   }
+

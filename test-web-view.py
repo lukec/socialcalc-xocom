@@ -6,7 +6,7 @@ hulahop.startup(os.path.expanduser('~/.test-hulahop'))
 from XOCom import XOCom
 
 # The XOCom object helps us communicate with the browser
-uri = "file:///home/olpc/src/testapp/web/index.html"
+uri = "file:///home/olpc/src/socialcalc-xocom/web/index.html"
 xocom = XOCom(uri)
 
 # This is just a simple way to trigger events from python for testing

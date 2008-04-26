@@ -19,7 +19,12 @@ my @files = glob("$dev_dir/*");
 for my $f (@files) {
     (my $basename = $f) =~ s#.+/##;
     my $app_file = "$app_dir/$basename";
-    unlink $app_file if -e $app_file;
+    if (-d $app_file) {
+        rmtree $app_file or die "Couldn't rmtree $app_file: $!";
+    }
+    if (-e $app_file) {
+        unlink $app_file or die "Couldn't unlink $app_file: $!";
+    }
     
     print "Symlinking $basename\n";
     symlink "$dev_dir/$basename" => $app_file 

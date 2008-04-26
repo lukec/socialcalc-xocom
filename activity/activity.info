@@ -1,7 +1,7 @@
 [Activity]
-name = OnePageWiki
-service_name = com.socialtext.OnePageWiki
-class = OnePageWikiActivity.OnePageWikiActivity
-icon = activity-onepagewiki
+name = SocialCalcActivity
+service_name = com.socialtext.SocialCalcActivity
+class = SocialCalcActivity.SocialCalcActivity
+icon = activity-socialcalc
 activity_version = 1
 show_launcher = yes
