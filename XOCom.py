@@ -1,11 +1,15 @@
+from sugar.activity.activity import get_bundle_path
 from hulahop.webview import WebView
 from xpcom import components
 
 class XOCom:
     # Constructor gives full XPCom access by default
     # This should be improved for future apps that may not need/want full access
-    def __init__(self, uri):
-        self.uri = uri
+    def __init__(self, uri=None):
+        if uri:
+            self.uri = uri
+        else:
+            self.uri = 'file://' + get_bundle_path() + '/web/index.html';
         self.give_full_xpcom_access()
 
     # Give the browser permission to use XPCom interfaces
@@ -58,4 +62,3 @@ class XOCom:
             result = result.QueryInterface(components.interfaces.nsISupportsString)
             return result.toString()
         return None
-
