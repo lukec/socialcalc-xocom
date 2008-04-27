@@ -2,6 +2,8 @@ from sugar.activity.activity import get_bundle_path
 from hulahop.webview import WebView
 from xpcom import components
 
+debug = True
+
 class XOCom:
     # Constructor gives full XPCom access by default
     # This should be improved for future apps that may not need/want full access
@@ -39,6 +41,9 @@ class XOCom:
     # The command will execute a javascript method registered with the same name,
     # and return any value received from the javascript
     def send_to_browser(self, command, parameter=None):
+        if debug:
+            print "sending: %s - (%s)"%(command, parameter)
+
         # Set up an array for parameters and return values for the XPCom call
         array = components.classes["@mozilla.org/array;1"].createInstance(
                 components.interfaces.nsIMutableArray)
@@ -56,9 +61,13 @@ class XOCom:
         ob_serv.notifyObservers(array, "xo-message", command);
 
         # check if the browser returned anything
+        result = None
         if array.length:
             iter = array.enumerate()
             result = iter.getNext()
             result = result.QueryInterface(components.interfaces.nsISupportsString)
-            return result.toString()
-        return None
+            result = result.toString()
+
+        if debug:
+            print "result: %s - (%s)"%(command, result)
+        return result

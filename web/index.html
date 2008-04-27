@@ -3,6 +3,7 @@
 <head>
 <META http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <title>SocialCalc 0.7.5</title>
+<script type="text/javascript" src="xocom.js"></script>
 <script type="text/javascript" src="socialcalc-3.js"></script>
 <script type="text/javascript" src="socialcalctableeditor.js"></script>
 <script type="text/javascript" src="formatnumber2.js"></script>
@@ -100,31 +101,34 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
 
    // Done initialization
 
-//
-// Example of how to get the serialized data
-//
+    //
+    // Reload the serialized data
+    //
+    XO.register('read', function(content) {
+       var parts = spreadsheet.DecodeSpreadsheetSave(savestr);
+       if (parts) {
+          if (parts.sheet) {
+             spreadsheet.sheet.ResetSheet();
+             spreadsheet.ParseSheetSave(
+                savestr.value.substring(parts.sheet.start, parts.sheet.end));
+             }
+          if (parts.edit) {
+              spreadsheet.editor.LoadEditorSettings(
+                savestr.value.substring(parts.edit.start, parts.edit.end));
+             }
+          }
+       spreadsheet.FullRefreshAndRender();
+    })
 
-function dosave() {
-   savestr = spreadsheet.CreateSpreadsheetSave();
-   }
-
-//
-// Example of how to reload the serialized data
-//
+    //
+    // Get the serialized data
+    //
+    XO.register('write', function() {
+        return spreadsheet.CreateSpreadsheetSave();
+    })
 
 function doreload() {
 
-   var parts = spreadsheet.DecodeSpreadsheetSave(savestr);
-   if (parts) {
-      if (parts.sheet) {
-         spreadsheet.sheet.ResetSheet();
-         spreadsheet.ParseSheetSave(savestr.value.substring(parts.sheet.start, parts.sheet.end));
-         }
-      if (parts.edit) {
-         spreadsheet.editor.LoadEditorSettings(savestr.value.substring(parts.edit.start, parts.edit.end));
-         }
-      }
-   spreadsheet.FullRefreshAndRender();
    }
 
 // This is just as a demo to show we might have graphing someday. It may be better to have it

@@ -35,5 +35,5 @@ class SocialCalcActivity (activity.Activity):
         # We must delay this to give the browser time to start up
         # It would be better if this send_to_browser was instead triggered
         # once the browser had finished loading.
-        gobject.timeout_add(2000, self.xocom.send_to_browser, 'read', content)
+        gobject.timeout_add(5000, self.xocom.send_to_browser, 'read', content)
         
