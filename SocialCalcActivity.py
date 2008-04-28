@@ -32,8 +32,10 @@ class SocialCalcActivity (activity.Activity):
     def read_file(self, filename):
         fh = open(filename, 'r')
         content = fh.read()
+        def send_delayed_read():
+            self.xocom.send_to_browser('read', content)
+            return False
         # We must delay this to give the browser time to start up
         # It would be better if this send_to_browser was instead triggered
         # once the browser had finished loading.
-        gobject.timeout_add(5000, self.xocom.send_to_browser, 'read', content)
-        
+        gobject.timeout_add(5000, send_delayed_read)
