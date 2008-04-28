@@ -28,7 +28,6 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
    window.onerror = function(m, u, l){ addmsg(m+" at line "+l); return true;};
 
    var spreadsheet = new SocialCalc.SpreadsheetControl();
-   var savestr = "";
 
    // Set up the tabs we want
 
@@ -105,19 +104,25 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
     // Reload the serialized data
     //
     XO.register('read', function(content) {
-       var parts = spreadsheet.DecodeSpreadsheetSave(savestr);
-       if (parts) {
-          if (parts.sheet) {
-             spreadsheet.sheet.ResetSheet();
-             spreadsheet.ParseSheetSave(
-                savestr.value.substring(parts.sheet.start, parts.sheet.end));
-             }
-          if (parts.edit) {
-              spreadsheet.editor.LoadEditorSettings(
-                savestr.value.substring(parts.edit.start, parts.edit.end));
-             }
-          }
-       spreadsheet.FullRefreshAndRender();
+        try {
+            var parts = spreadsheet.DecodeSpreadsheetSave(content);
+            if (parts) {
+                if (parts.sheet) {
+                    spreadsheet.sheet.ResetSheet();
+                    spreadsheet.ParseSheetSave(
+                    content.substring(parts.sheet.start, parts.sheet.end));
+                }
+                if (parts.edit) {
+                    spreadsheet.editor.LoadEditorSettings(
+                    content.substring(parts.edit.start, parts.edit.end));
+                }
+            }
+            spreadsheet.FullRefreshAndRender();
+        }
+        catch (err) {
+            return err
+        }
+        return "loaded"
     })
 
     //
