@@ -9,6 +9,8 @@ os.system("find ./ -name 'activity' -prune -o -name 'NEWS' \
                                     -prune -o -name '.svn' \
                                     -prune -o -name '*.pyc' \
                                     -prune -o -name '*.xo' \
+                                    -prune -o -name '*.swp' \
+                                    -prune -o -name '.git*' \
                                     -prune -o -type f \
                    -print > MANIFEST") 
 
