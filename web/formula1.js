@@ -30,6 +30,7 @@
 
    var SocialCalc;
    if (!SocialCalc) SocialCalc = {}; // May be used with other SocialCalc libraries or standalone
+                                     // In any case, requires SocialCalc.Constants.
 
 SocialCalc.Formula = {};
 
@@ -144,6 +145,7 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
    var i, ch, chclass, haddecimal, last_token, last_token_type, last_token_text, t;
 
    var scf = SocialCalc.Formula;
+   var scc = SocialCalc.Constants;
    var parsestate = scf.ParseState;
    var tokentype = scf.TokenType;
    var charclass = scf.CharClass;
@@ -188,7 +190,7 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
          }
 
       if (state == parsestate.numexp1) {
-         if (cclass == state_num) {
+         if (cclass == parsestate.num) {
             state = parsestate.numexp2;
             }
          else if ((ch == '+' || ch == '-') && (uppercasetable[str.charAt(str.length-1)] == 'E')) {
@@ -198,7 +200,7 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
             ;
             }
          else {
-            pushtoken(parseinfo, "parseerrexponent", tokentype.error, 0);
+            pushtoken(parseinfo, scc.s_parseerrexponent, tokentype.error, 0);
             state = 0;
             }
          }
@@ -229,7 +231,7 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
             state = 0;
             }
          else {
-            pushtoken(parseinfo, str, tokentype.error, 0);
+            pushtoken(parseinfo, scc.s_parseerrchar, tokentype.error, 0);
             state = 0;
             }
          }
@@ -244,7 +246,8 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
          else if (cclass == charclass.alpha) {
             state = parsestate.alphanumeric;
             }
-         else if (cclass == charclass.op || cclass == charclass.numstart || cclass == charclass.eof) {
+         else if (cclass == charclass.op || cclass == charclass.numstart ||
+                  cclass == charclass.eof || cclass == charclass.space) {
             if (coordregex.test(str)) {
                t = tokentype.coord;
                }
@@ -255,7 +258,7 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
             state = 0;
             }
          else {
-            pushtoken(parseinfo, str, tokentype.error, 0);
+            pushtoken(parseinfo, scc.s_parseerrchar, tokentype.error, 0);
             state = 0;
            }
          }
@@ -271,7 +274,7 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
             state = 0;
             }
          else {
-            pushtoken(parseinfo, str, tokentype.error, 0);
+            pushtoken(parseinfo, scc.s_parseerrchar, tokentype.error, 0);
             state = 0;
             }
          }
@@ -281,7 +284,7 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
             state = parsestate.stringquote; // got quote in string: is it doubled (quote in string) or by itself (end of string)?
             }
          else if (cclass == charclass.eof) {
-            pushtoken(parseinfo, "parseerrstring", tokentype.error, 0);
+            pushtoken(parseinfo, scc.s_parseerrstring, tokentype.error, 0);
             state = 0;
             }
          else {
@@ -305,7 +308,7 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
             state = 0; // drop through to process
             }
          else if (cclass == charclass.eof) {
-            pushtoken(parseinfo, "parseerrspecialvalue", tokentype.error, 0);
+            pushtoken(parseinfo, scc.s_parseerrspecialvalue, tokentype.error, 0);
             state = 0;
             }
          else {
@@ -373,7 +376,7 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
                   }
                else if (str != '(') { // binary-op open-paren OK, others no
                   t = tokentype.error;
-                  str = "parseerrtwoops";
+                  str = scc.s_parseerrtwoops;
                   }
                }
             else if (str.length > 1) {
@@ -391,7 +394,7 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
                   }
                else {
                   t = tokentype.error;
-                  str = "parseerrtwoops";
+                  str = scc.s_parseerrtwoops;
                   }
                }
             pushtoken(parseinfo, str, t, ch);
@@ -405,6 +408,9 @@ SocialCalc.Formula.ParseFormulaIntoTokens = function(line) {
             pushtoken(parseinfo, " ", tokentype.space, 0);
             }
          else if (cclass == charclass.eof) { // ignore -- needed to have extra loop to close out other things
+            }
+         else { // unknown class - such as unknown char
+            pushtoken(parseinfo, scc.s_parseerrchar, tokentype.error, 0);
             }
          }
       }
@@ -442,7 +448,7 @@ SocialCalc.Formula.evaluate_parsed_formula = function(parseinfo, sheet, allowran
 
    var errortext = "";
 
-   revpolish = scf.ConvertInfixToPolish(parseinfo);
+   revpolish = scf.ConvertInfixToPolish(parseinfo); // result is either an array or a string with error text
 
    result = scf.EvaluatePolish(parseinfo, revpolish, sheet, allowrangereturn);
 
@@ -465,6 +471,7 @@ SocialCalc.Formula.evaluate_parsed_formula = function(parseinfo, sheet, allowran
 SocialCalc.Formula.ConvertInfixToPolish = function(parseinfo) {
 
    var scf = SocialCalc.Formula;
+   var scc = SocialCalc.Constants;
    var tokentype = scf.TokenType;
    var token_precedence = scf.TokenPrecedence;
 
@@ -496,7 +503,7 @@ SocialCalc.Formula.ConvertInfixToPolish = function(parseinfo) {
             revpolish.push(parsestack.pop());
             }
          if (parsestack.length == 0) { // no ( -- error
-            errortext = "parseerrmissingopenparen";
+            errortext = scc.s_parseerrmissingopenparen;
             break;
             }
          }
@@ -508,7 +515,7 @@ SocialCalc.Formula.ConvertInfixToPolish = function(parseinfo) {
             revpolish.push(parsestack.pop());
             }
          if (parsestack.length == 0) { // no ( -- error
-            errortext = "parseerrcloseparennoopen";
+            errortext = scc.s_parseerrcloseparennoopen;
             break;
             }
          parsestack.pop();
@@ -549,7 +556,7 @@ SocialCalc.Formula.ConvertInfixToPolish = function(parseinfo) {
       }
    while (parsestack.length>0) {
       if (parseinfo[parsestack[parsestack.length-1]].text == '(') {
-         errortext = "parseerrmissingcloseparen";
+         errortext = scc.s_parseerrmissingcloseparen;
          break;
          }
       revpolish.push(parsestack.pop());
@@ -581,6 +588,7 @@ SocialCalc.Formula.ConvertInfixToPolish = function(parseinfo) {
 SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowrangereturn) {
 
    var scf = SocialCalc.Formula;
+   var scc = SocialCalc.Constants;
    var tokentype = scf.TokenType;
    var lookup_result_type = scf.LookupResultType;
    var typelookup = scf.TypeLookupTable;
@@ -592,7 +600,7 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
 
    var errortext = "";
    var function_start = -1;
-   var missingOperandError = {value: "", type: "e#VALUE!", error: "parseerrmissingoperand"};
+   var missingOperandError = {value: "", type: "e#VALUE!", error: scc.s_parseerrmissingoperand};
 
    var operand = [];
    var PushOperand = function(t, v) {operand.push({type: t, value: v});};
@@ -600,7 +608,7 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
    var i, rii, prii, ttype, ttext, value1, value2, tostype, tostype2, resulttype, valuetype, cond, vmatch, smatch;
 
    if (!parseinfo.length || (! (revpolish instanceof Array))) {
-      return ({value: "", type: "e#VALUE!", error: typeof revpolish == "string" ? revpolish : ""});
+      return ({value: "", type: "e#VALUE!", error: (typeof revpolish == "string" ? revpolish : "")});
       }
 
    for (i=0; i<revpolish.length; i++) {
@@ -675,6 +683,9 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
                return missingOperandError;
                }
             value1 = scf.OperandsAsRangeOnSheet(sheet, operand); // get coords even if use name on other sheet
+            if (value1.error) { // not available
+               errortext = errortext || value1.error;
+               }
             PushOperand(value1.type, value1.value); // push sheetname with range on that sheet
             }
 
@@ -685,6 +696,9 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
                return missingOperandError;
                }
             value1 = operands_as_coord_on_sheet(sheet, operand); // get coord even if name on other sheet
+            if (value1.error) { // not available
+               errortext = errortext || value1.error;
+               }
             PushOperand(value1.type, value1.value); // push sheetname with coord or range on that sheet
             }
 
@@ -692,7 +706,7 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
 
          else if (ttext == "<" || ttext == "L" || ttext == "=" || ttext == "G" || ttext == ">" || ttext == "N") {
             if (operand.length <= 1) { // Need at least two things on the stack...
-               errortext = "parseerrmissingoperand"; // remember error
+               errortext = scc.s_parseerrmissingoperand; // remember error
                break;
                }
             value2 = operand_value_and_type(sheet, operand);
@@ -745,7 +759,7 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
 
          else { // what's left are the normal infix arithmetic operators
             if (operand.length <= 1) { // Need at least two things on the stack...
-               errortext = "parseerrmissingoperand"; // remember error
+               errortext = scc.s_parseerrmissingoperand; // remember error
                break;
                }
             value2 = operand_as_number(sheet, operand);
@@ -790,7 +804,7 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
          }
 
       else {
-         errortext = "Unknown token "+ttype+" ("+ttext+"). ";
+         errortext = scc.s_InternalError+"Unknown token "+ttype+" ("+ttext+"). ";
          break;
          }
       }
@@ -818,7 +832,7 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
       }
 
    if (operand.length > 1 && !errortext) { // something left - error
-      errortext += "parseerrerrorinformula";
+      errortext += scc.s_parseerrerrorinformula;
       }
 
    // set return type
@@ -826,7 +840,7 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
    valuetype = tostype;
 
    if (tostype.charAt(0) == "e") { // error value
-      errortext = errortext || tostype.substring(1) || "calcerrerrorvalueinformula";
+      errortext = errortext || tostype.substring(1) || scc.s_calcerrerrorvalueinformula;
       }
    else if (tostype == "range") {
       vmatch = value.match(/^(.*)\|(.*)\|/);
@@ -839,7 +853,7 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
          }
       value = vmatch[1] + ":" + vmatch[2].toUpperCase();
       if (!allowrangereturn) {
-         errortext = "formularangeresult "+value+".";
+         errortext = scc.s_formularangeresult+" "+value;
          }
       }
 
@@ -850,10 +864,10 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
 
    // look for overflow
 
-   if (tostype.charAt(0) == "n" && (isNaN(value) || !isFinite(value))) {
+   if (valuetype.charAt(0) == "n" && (isNaN(value) || !isFinite(value))) {
       value = 0;
       valuetype = "e#NUM!";
-      errortext = "calcerrnumericoverflow";
+      errortext = isNaN(value) ? scc.s_calcerrnumericnan: scc.s_calcerrnumericoverflow;
       }
 
    return ({value: value, type: valuetype, error: errortext});
@@ -927,7 +941,7 @@ SocialCalc.Formula.TopOfStackValueAndType = function(sheet, operand) {
    var stacklen = operand.length;
 
    if (!stacklen) { // make sure something is there
-      result.error = "no operand on stack";
+      result.error = SocialCalc.Constants.s_InternalError+"no operand on stack";
       return result;
       }
 
@@ -1050,7 +1064,7 @@ SocialCalc.Formula.OperandValueAndType = function(sheet, operand) {
    var stacklen = operand.length;
 
    if (!stacklen) { // make sure something is there
-      result.error = "no operand on stack";
+      result.error = SocialCalc.Constants.s_InternalError+"no operand on stack";
       return result;
       }
 
@@ -1074,6 +1088,7 @@ SocialCalc.Formula.OperandValueAndType = function(sheet, operand) {
          if (coordsheet == null) { // unavailable
             result.value = 0;
             result.type = "e#REF!";
+            result.error = SocialCalc.Constants.s_sheetunavailable+" "+result.value.substring(pos+1);
             return result;
             }
          result.value = result.value.substring(0, pos); // get coord part
@@ -1131,7 +1146,7 @@ SocialCalc.Formula.OperandAsCoord = function(sheet, operand) {
       return result;
       }
    else {
-      result.value = "calcerrcellrefmissing";
+      result.value = SocialCalc.Constants.s_calcerrcellrefmissing;
       result.type = "e#REF!";
       return result;
       }
@@ -1145,6 +1160,7 @@ SocialCalc.Formula.OperandAsCoord = function(sheet, operand) {
 # Gets 2 at top of stack and pops them, treating them as sheetname!coord-or-name.
 # Returns stack-style coord value (coord!sheetname, or coord!sheetname|coord|) with
 # a type of coord or range. All others are treated as an error.
+# If sheetname not available, sets result.error.
 #
 */
 
@@ -1165,6 +1181,7 @@ SocialCalc.Formula.OperandsAsCoordOnSheet = function(sheet, operand) {
    if (othersheet == null) {
       result.type = "e#REF!";
       result.value = 0;
+      result.error = SocialCalc.Constants.s_sheetunavailable+" "+sheetname.value;
       return result;
       }
 
@@ -1176,13 +1193,16 @@ SocialCalc.Formula.OperandsAsCoordOnSheet = function(sheet, operand) {
       result.value = value1.value + "!" + sheetname.value; // return in the format as used on stack
       }
    else if (value1.type == "range") { // value is a range reference
-      pos1 = value1.indexOf("|");
-      pos2 = value1.indexOf("|", pos1+1);
-      result.value = value1.substring(0, pos1) + "!" + sheetname.value +
-                    "|" + value1.substring(pos1+1, pos2) + "|";
+      pos1 = value1.value.indexOf("|");
+      pos2 = value1.value.indexOf("|", pos1+1);
+      result.value = value1.value.substring(0, pos1) + "!" + sheetname.value +
+                    "|" + value1.value.substring(pos1+1, pos2) + "|";
+      }
+   else if (value1.type.charAt(0)=="e") {
+      result.value = value1.value;
       }
    else {
-      result.error = "calcerrcellrefmissing";
+      result.error = SocialCalc.Constants.s_calcerrcellrefmissing;
       result.type = "e#REF!";
       result.value = 0;
       }
@@ -1206,6 +1226,7 @@ SocialCalc.Formula.OperandsAsRangeOnSheet = function(sheet, operand) {
    var value1, othersheet, pos1, pos2;
    var value2 = {};
    var scf = SocialCalc.Formula;
+   var scc = SocialCalc.Constants;
 
    var stacklen = operand.length;
    value2.value = operand[stacklen-1].value; // get top of stack - coord or name for "right" side
@@ -1221,9 +1242,10 @@ SocialCalc.Formula.OperandsAsRangeOnSheet = function(sheet, operand) {
    pos1 = value1.value.indexOf("!");
    if (pos1 != -1) { // sheet reference
       pos2 = value1.value.indexOf("|", pos1+1);
+      if (pos2 < 0) pos2 = value1.value.length;
       othersheet = scf.FindInSheetCache(value1.value.substring(pos1+1,pos2)); // get other sheet
       if (othersheet == null) { // unavailable
-         return {value: 0, type: "e#REF!"};
+         return {value: 0, type: "e#REF!", errortext: scc.s_sheetunavailable+" "+value1.value.substring(pos1+1,pos2)};
          }
       }
 
@@ -1235,7 +1257,7 @@ SocialCalc.Formula.OperandsAsRangeOnSheet = function(sheet, operand) {
       return {value: value1.value+"|"+value2.value+"|", type: "range"}; // return range in the format as used on stack
       }
    else { // bad form
-      return {value: "calcerrcellrefmissing", type: "e#REF!"};
+      return {value: scc.s_calcerrcellrefmissing, type: "e#REF!"};
       }
    }
 
@@ -1269,17 +1291,25 @@ SocialCalc.Formula.OperandAsSheetName = function(sheet, operand) {
          return result;
          }
       result.value = nvalue.value;
+      result.type = nvalue.type;
       }
    if (result.type == "coord") { // value is a coord reference, follow it to find sheet name
       cell = sheet.cells[result.value];
-      result.type = cell ? cell.valuetype : "b";
+      if (cell) {
+         result.value = cell.datavalue;
+         result.type = cell.valuetype;
+         }
+      else {
+         result.value = "";
+         result.type = "b";
+         }
       }
    if (result.type.charAt(0) == "t") { // value is a string which could be a sheet name
       return result;
       }
    else {
       result.value = "";
-      result.error = "calcerrsheetnamemissing";
+      result.error = SocialCalc.Constants.s_calcerrsheetnamemissing;
       return result;
       }
 
@@ -1313,7 +1343,7 @@ SocialCalc.Formula.LookupName = function(sheet, name) {
          else {
             if (sheet.checknamecirc[name]) { // circular reference
                value.type = "e#NAME?";
-               value.errortext = 'Circular name reference to name "' + name + '".';
+               value.error = SocialCalc.Constants.s_circularnameref+' "' + name + '".';
                return value;
                }
             }
@@ -1353,7 +1383,7 @@ SocialCalc.Formula.LookupName = function(sheet, name) {
    else {
       value.value = "";
       value.type = "e#NAME?";
-      value.errortext = "calcerrunknownname"+name;
+      value.error = SocialCalc.Constants.s_calcerrunknownname+' "'+name+'"';
       return value;
       }
    }
@@ -1380,7 +1410,7 @@ SocialCalc.Formula.StepThroughRangeDown = function(operand, rangevalue) {
 
    pos1 = value1.indexOf("!");
    if (pos1 != -1) {
-      sheet1 = "!"+value1.substring(pos1);
+      sheet1 = value1.substring(pos1);
       value1 = value1.substring(0, pos1);
       }
    else {
@@ -1434,7 +1464,7 @@ SocialCalc.Formula.DecodeRangeParts = function(sheetdata, range) {
 
    pos1 = value1.indexOf("!");
    if (pos1 != -1) {
-      sheet1 = value1.substring(pos1);
+      sheet1 = value1.substring(pos1+1);
       value1 = value1.substring(0, pos1);
       }
    else {
@@ -1448,7 +1478,7 @@ SocialCalc.Formula.DecodeRangeParts = function(sheetdata, range) {
    coordsheetdata = sheetdata;
    if (sheet1) { // sheet reference
       coordsheetdata = scf.FindInSheetCache(sheet1);
-      if (othersheet == null) { // this sheet is unavailable
+      if (coordsheetdata == null) { // this sheet is unavailable
          return null;
          }
       }
@@ -1496,7 +1526,7 @@ SocialCalc.Formula.CalculateFunction = function(fname, operand, sheet) {
    var fobj, foperand, ffunc, argnum, ttext;
    var scf = SocialCalc.Formula;
    var ok = 1;
-   var errortext = null;
+   var errortext = "";
 
    fobj = scf.FunctionList[fname];
 
@@ -1531,7 +1561,7 @@ SocialCalc.Formula.CalculateFunction = function(fname, operand, sheet) {
             }
 
          else {
-            errortext = "sheetfuncunknownfunction" + ttext +". ";
+            errortext = SocialCalc.Constants.s_sheetfuncunknownfunction+" " + ttext +". ";
             }
       }
 
@@ -1582,7 +1612,7 @@ SocialCalc.Formula.CopyFunctionArgs = function(operand, foperand) {
 
 SocialCalc.Formula.FunctionArgsError = function(fname, operand) {
 
-   var errortext = "calcerrincorrectargstofunction" + fname + ". ";
+   var errortext = SocialCalc.Constants.s_calcerrincorrectargstofunction+" " + fname + ". ";
    SocialCalc.Formula.PushOperand(operand, "e#VALUE!", errortext);
 
    return errortext;
@@ -2134,7 +2164,7 @@ SocialCalc.Formula.LookupFunctions = function(fname, operand, foperand, sheet) {
             scf.FunctionArgsError(fname, operand);
             return 0;
             }
-         rangelookup = rangelookup ? 1 : 0; // convert to 1 or 0
+         rangelookup = rangelookup.value ? 1 : 0; // convert to 1 or 0
          }
       }
    lookupvalue.type = lookupvalue.type.charAt(0); // only deal with general type
@@ -2148,6 +2178,10 @@ SocialCalc.Formula.LookupFunctions = function(fname, operand, foperand, sheet) {
       }
 
    rangeinfo = scf.DecodeRangeParts(sheet, range.value, range.type);
+   if (!rangeinfo) {
+      PushOperand("e#REF!", 0);
+      return;
+      }
 
    c = 0;
    r = 0;
@@ -2960,7 +2994,7 @@ SocialCalc.Formula.StringFunctions = function(fname, operand, foperand, sheet) {
          while (true) {
             pos = fulltext.indexOf(oldtext, oldpos);
             if (pos >= 0) {
-               count++;if (count>1000) {alert(pos); break;} //!!!!!!!!!!!!!!
+               count++; //!!!!!! old test just in case: if (count>1000) {alert(pos); break;}
                result += fulltext.substring(oldpos, pos);
                if (which==0) {
                   result += newtext; // substitute
@@ -3253,7 +3287,7 @@ SocialCalc.Formula.Math1Functions = function(fname, operand, foperand, sheet) {
          case "LN":
             if (value <= 0) {
                result.type = "e#NUM!";
-               result.error = "sheetfunclnarg";
+               result.error = SocialCalc.Constants.s_sheetfunclnarg;
                }
             value = Math.log(value);
             break;
@@ -3261,7 +3295,7 @@ SocialCalc.Formula.Math1Functions = function(fname, operand, foperand, sheet) {
          case "LOG10":
             if (value <= 0) {
                result.type = "e#NUM!";
-               result.error = "sheetfunclog10arg";
+               result.error = SocialCalc.Constants.s_sheetfunclog10arg;
                }
             value = Math.log(value)/Math.log(10);
             break;
@@ -3437,7 +3471,7 @@ SocialCalc.Formula.LogFunction = function(fname, operand, foperand, sheet) {
    if (foperand.length == 1) {
       value2 = scf.OperandAsNumber(sheet, foperand);
       if (value2.type.charAt(0) != "n" || value2.value <= 0) {
-         scf.FunctionSpecificError(fname, operand, "e#NUM!", "sheetfunclogsecondarg");
+         scf.FunctionSpecificError(fname, operand, "e#NUM!", SocialCalc.Constants.s_sheetfunclogsecondarg);
          return 0;
          }
       }
@@ -3451,7 +3485,7 @@ SocialCalc.Formula.LogFunction = function(fname, operand, foperand, sheet) {
 
    if (result.type == "n") {
       if (value.value <= 0) {
-         scf.FunctionSpecificError(fname, operand, "e#NUM!", "sheetfunclogfirstarg");
+         scf.FunctionSpecificError(fname, operand, "e#NUM!", SocialCalc.Constants.s_sheetfunclogfirstarg);
          return 0;
          }
       result.value = Math.log(value.value)/Math.log(value2.value);
@@ -3486,7 +3520,7 @@ SocialCalc.Formula.RoundFunction = function(fname, operand, foperand, sheet) {
    if (foperand.length == 1) {
       value2 = scf.OperandValueAndType(sheet, foperand);
       if (value2.type.charAt(0) != "n") {
-         scf.FunctionSpecificError(fname, operand, "e#NUM!", "sheetfuncroundsecondarg");
+         scf.FunctionSpecificError(fname, operand, "e#NUM!", SocialCalc.Constants.s_sheetfuncroundsecondarg);
          return 0;
          }
       }
@@ -3801,7 +3835,7 @@ SocialCalc.Formula.DDBFunction = function(fname, operand, foperand, sheet) {
    if (scf.CheckForErrorValue(operand, period)) return;
 
    if (lifetime.value < 1) {
-      scf.FunctionSpecificError(fname, operand, "e#NUM!", "sheetfuncddblife");
+      scf.FunctionSpecificError(fname, operand, "e#NUM!", SocialCalc.Constants.s_sheetfuncddblife);
       return 0;
       }
 
@@ -3857,7 +3891,7 @@ SocialCalc.Formula.SLNFunction = function(fname, operand, foperand, sheet) {
    if (scf.CheckForErrorValue(operand, lifetime)) return;
 
    if (lifetime.value < 1) {
-      scf.FunctionSpecificError(fname, operand, "e#NUM!", "sheetfuncslnlife");
+      scf.FunctionSpecificError(fname, operand, "e#NUM!", SocialCalc.Constants.s_sheetfuncslnlife);
       return 0;
       }
 

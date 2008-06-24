@@ -2,8 +2,9 @@
 <html>
 <head>
 <META http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>SocialCalc 0.7.5</title>
+<title>SocialCalc 0.7.6</title>
 <script type="text/javascript" src="xocom.js"></script>
+<script type="text/javascript" src="socialcalcconstants.js"></script>
 <script type="text/javascript" src="socialcalc-3.js"></script>
 <script type="text/javascript" src="socialcalctableeditor.js"></script>
 <script type="text/javascript" src="formatnumber2.js"></script>
@@ -33,11 +34,14 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
 
    // Remove Audit
 
-   var auditnum = spreadsheet.tabnums.audit;
-   spreadsheet.tabs.splice(auditnum, 1);
-   delete spreadsheet.tabnums.audit;
+   spreadsheet.tabs.splice(spreadsheet.tabnums.audit, 1);
 
-   // Plain
+   spreadsheet.tabnums = {};
+   for (var i=0; i<spreadsheet.tabs.length; i++) {
+      spreadsheet.tabnums[spreadsheet.tabs[i].name] = i;
+      }
+
+   // Add Plain
 
    spreadsheet.tabnums.plain = spreadsheet.tabs.length;
    spreadsheet.tabs.push({name: "plain", text: "Plain", html:
@@ -58,7 +62,7 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
       '<div id="%id.plainview" style="margin-right:0px;border:1px solid black;overflow:auto;">Plain View</div>'
       };
 
-   // Graph
+   // Add Graph
 
    spreadsheet.tabnums.graph = spreadsheet.tabs.length;
    spreadsheet.tabs.push({name: "graph", text: "Graph", html:
@@ -74,7 +78,7 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
       '<div id="%id.graphview" style="overflow:auto;">Graph View</div>'
       };
 
-   // Help
+   // Add Help
 
    spreadsheet.tabnums.help = spreadsheet.tabs.length;
    spreadsheet.tabs.push({name: "help", text: "Help", html:
@@ -132,9 +136,6 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
         return spreadsheet.CreateSpreadsheetSave();
     })
 
-function doreload() {
-
-   }
 
 // This is just as a demo to show we might have graphing someday. It may be better to have it
 // in a different activity.
@@ -222,7 +223,6 @@ function DoHelp(s, t) {
 '<i>This is an early version of a spreadsheet built on SocialCalc JavaScript code, still in development. '+
 '</i> '+
 '<br><br> '+
-'The <b>Edit, Text, and Format tabs</b> lets you use the editing grid. '+
 'You can use the arrow keys and mouse to select cells in a manner similar to traditional spreadsheets. '+
 'This includes using the shift key, as well as dragging. '+
 '<br><br> '+
@@ -250,7 +250,6 @@ function DoHelp(s, t) {
 '<br><br> '+
 'Use the Esc key to cancel during edits. '+
 'The Del key deletes the values of the selected cell(s). '+
-'The Erase command can be used to delete both contents and formatting. '+
 '<br><br> '+
 'The 109 formula functions that the June 2007 Open Document Format "Open Formula" specification  '+
 'calls the "small group" are available. '+
@@ -264,29 +263,38 @@ function DoHelp(s, t) {
 '(comparisons are not case-sensitive). '+
 '<br><br> '+
 'This release has an early HTML version of an editing interface. '+
-'There is just the simple input box instead of a formula bar and no editing button bar, etc. '+
 'There is a simple Sugar-like interface for accessing some of the editing API through tabs, buttons, and drop downs. '+
-'With drop downs, select the operation (such as for setting numeric formats, text color, background color, etc.) from the first drop down '+
-'and then the corresponding values from the second. '+
-'Apply the command (to the current cell, selected range of cells, or as a global default as appropriate) '+
-'by pressing the OK button. '+
 '<br><br> '+
-'The program maintains an undo stack accessed through the Undo and Redo buttons. '+
+'The program maintains an undo stack accessed through the Undo and Redo buttons on the left of the Edit tab toolbar. '+
 'Right now the stack saves all operations and grows until you quit. '+
 '<br><br> '+
-'The <b>Sort tab</b> lets you select a range of cells (which is remembered) to sort, as well as to set which columns '+
+'There is a <b>Format</b> tab for accessing all of the format settings, both for individual cells as well '+
+'as for the sheet-wide defaults that are applied to cells without explicit settings for that attribute. '+
+'You can make changes to any or all of the settings and then press the "Save" button in the toolbar above to apply them. '+
+'While the cell settings are only displayed for the current cell, on "Save" the same changes are applied to all cells '+
+'in the currently highlighted range of cells. '+
+'The Sheet settings let you set the default size of columns. To change the width of an individual column click and '+
+'drag in the column header. '+
+'<br><br> '+
+'The <b>Sort</b> tab lets you select a range of cells (which is remembered) to sort, as well as to set which columns '+
 'are used to determine the order and the direction. '+
 '<br><br> '+
-'The <b>Graph tab</b> displays a very simple bar graph representation of the cells currently selected as a range '+
+'There is a <b>Comment</b> tab for accessing the optional comment text for the currently selected cell.'+
+'<br><br> '+
+'The <b>Name</b> tab lets you set named ranges that may be used in formulas.'+
+'<br><br> '+
+'The <b>Graph</b> tab displays a very simple bar graph representation of the cells currently selected as a range '+
 '(either in a single row across or column down). '+
 'If the range is a single row or column, and if the row above (or column to the left) has values, those values are used as labels. '+
 'Otherwise the cell coordinates are used (e.g., B5). '+
 'This is a very early, minimal implementation. '+
 '<br><br> '+
-'The <b>Plain tab</b> shows the sheet rendered without the grid or editing controls. '+
+'The <b>Plain</b> tab shows the sheet rendered without the grid or editing controls. '+
 '<br><br> '+
-'The <b>Clipboard tab</b> lets you see and reload the SocialCalc clipboard in tab-delimited format. '+
-'This is what a browser and Excel put on the clipboard when you select and then copy cells in a table. '+
+'The <b>Clipboard</b> tab lets you view the SocialCalc clipboard in tab-delimited format, and optionally reload it with new data. '+
+'Tab-delimited format is what a browser and Excel put on the clipboard when you select and then copy cells in a table. '+
+'The Clipboard tab also supports CSV format and the SocialCalc Save format (useful for copying from one sheet to another). '+
+'Reloading from the SocialCalc Save format must be in correct format -- errors can cause SocialCalc to behave badly. '+
 '<br><br> '+
 'Right now this code is mainly being developed to run under control of a native Python '+
 'application running on the OLPC XO. '+
@@ -457,6 +465,8 @@ function DoHelp(s, t) {
 '<dt>SUMIF(range1, criteria [, range2])<dd>Sums the numeric values of cells in the range that meet the criteria. '+
 'The criteria may be a value ("x", 15, 1+3) or a test (>25). '+
 'If range2 is present, then range1 is tested and the corresponding range2 value is summed. '+
+'<dt>SYD(cost, salvage, lifetime, period)<dd>Depreciation by Sum of Year\'s Digits method. '+
+'<dt>T(value)<dd>Returns the text value or else a null string. '+
 '<dt>TAN(value)<dd>Trigonometric tangent function (value is in radians) '+
 '<dt>TIME(hour, minute, second)<dd>Returns the time value given the specified '+
 'hour, minute, and second. '+

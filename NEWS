@@ -1,3 +1,6 @@
+0.1.1 - Mon Jun 23 23:27:31 EDT 2008
+* Updated to use Socialcalc 0.7.6
+
 0.1 - Tue Apr 15 00:14:58 EDT 2008
 * Now with synchrous method calling
 * Saves and Loads from Journal

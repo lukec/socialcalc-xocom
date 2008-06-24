@@ -89,7 +89,8 @@ More comments yet to come...
 */
 
 
-var SocialCalc = {}; // This library should be loaded first!
+var SocialCalc;
+if (!SocialCalc) SocialCalc = {};
 
 // *************************************
 //
@@ -99,28 +100,12 @@ var SocialCalc = {}; // This library should be loaded first!
 //
 // *************************************
 
-// Default values
+// Callbacks
 
-SocialCalc.defaultvalues = {
-   defaultlayout: "padding:2px 2px 1px 2px;vertical-align:top;",
-   defaultfontstyle: "normal normal",
-   defaultfontsize: "small",
-   defaultfontfamily: "Verdana,Arial,Helvetica,sans-serif",
-   defaultcolwidth: "80", // text
-   assumedrowheight: 15, // numeric
-   linkformatstring: "Link", // you could make this an img tag if desired:
-   defaultformatdt: 'd-mmm-yyyy h:mm:ss',
-   defaultformatd: 'd-mmm-yyyy',
-   defaultformatt: '[h]:mm:ss',
-   displaytrue: 'TRUE', // how TRUE shows when rendered
-   displayfalse: 'FALSE',
-
-   textdatadefaulttype: "t", // !!! This sets the default type for text on reading source file
-                             // (tw would be wiki-text, like SocialCalc)
+SocialCalc.Callbacks = {
    expand_markup: function(displayvalue, sheetobj, linkstyle) // the function to expand wiki text - may be replaced
                    {return SocialCalc.default_expand_markup(displayvalue, sheetobj, linkstyle);}
-
-   }
+   };
 
 // Shared flags
 
@@ -157,7 +142,9 @@ SocialCalc.CellProperties = {
    bt: 2, br: 2, bb: 2, bl: 2, layout: 2, font: 2, color: 2, bgcolor: 2,
    cellformat: 2, nontextvalueformat: 2, textvalueformat: 2, colspan: 2, rowspan: 2,
    cssc: 2, csss: 2, mod: 2,
-   displaystring: 3, parseinfo: 3
+   displaystring: 3, // used to cache rendered HTML of cell contents
+   parseinfo: 3, // used to cache parsed formulas
+   hcolspan: 3, hrowspan: 3 // spans taking hidden cols/rows into account (!!! NOT YET !!!)
    };
 
 SocialCalc.CellPropertiesTable = {
@@ -242,6 +229,11 @@ SocialCalc.Sheet.prototype.ParseSheetSave = function(savedsheet) {SocialCalc.Par
 SocialCalc.Sheet.prototype.CellFromStringParts = function(cell, parts, j) {return SocialCalc.CellFromStringParts(this, cell, parts, j);};
 SocialCalc.Sheet.prototype.CreateSheetSave = function(range) {return SocialCalc.CreateSheetSave(this, range);};
 SocialCalc.Sheet.prototype.CellToString = function(cell) {return SocialCalc.CellToString(this, cell);};
+SocialCalc.Sheet.prototype.EncodeCellAttributes = function(coord) {return SocialCalc.EncodeCellAttributes(this, coord);};
+SocialCalc.Sheet.prototype.EncodeSheetAttributes = function() {return SocialCalc.EncodeSheetAttributes(this);};
+SocialCalc.Sheet.prototype.DecodeCellAttributes = function(coord, attribs, range) {return SocialCalc.DecodeCellAttributes(this, coord, attribs, range);};
+SocialCalc.Sheet.prototype.DecodeSheetAttributes = function(attribs) {return SocialCalc.DecodeSheetAttributes(this, attribs);};
+
 SocialCalc.Sheet.prototype.ExecuteSheetCommand = function(cmd, saveundo) {return SocialCalc.ExecuteSheetCommand(this, cmd, saveundo);};
 SocialCalc.Sheet.prototype.SheetUndo = function() {return SocialCalc.SheetUndo(this);};
 SocialCalc.Sheet.prototype.SheetRedo = function() {return SocialCalc.SheetRedo(this);};
@@ -310,13 +302,14 @@ SocialCalc.Sheet.prototype.CheckAndCalcCell = function(coord) {return SocialCalc
 //       recalc:value - on/off (on is default). If "on", appropriate changes to the sheet cause a recalc
 //       needsrecalc:value - yes/no (no is default). If "yes", formula values are not up to date
 //
-//    name:name:description:value - name definition, name in uppercase, with value being "B5", "A1:B7", or "=formula"
+//    name:name:description:value - name definition, name in uppercase, with value being "B5", "A1:B7", or "=formula";
+//                                  description and value are encoded.
 //    font:fontnum:value - text of font definition (style weight size family) for font fontnum
 //                         "*" for "style weight", size, or family, means use default (first look to sheet, then builtin)
 //    color:colornum:rgbvalue - text of color definition (e.g., rgb(255,255,255)) for color colornum
 //    border:bordernum:value - text of border definition (thickness style color) for border bordernum
-//    layout:layoutnum:value - text of vertical alignment and padding style for cell layout layoutnum:
-//                             vertical-alignment:vavalue;padding topval rightval bottomval leftval;
+//    layout:layoutnum:value - text of vertical alignment and padding style for cell layout layoutnum (* for default):
+//                             vertical-alignment:vavalue;padding:topval rightval bottomval leftval;
 //    cellformat:cformatnum:value - text of cell alignment (left/center/right) for cellformat cformatnum
 //    valueformat:vformatnum:value - text of number format (see FormatValueForDisplay) for valueformat vformatnum (changed in v1.2)
 //    clipboardrange:upperleftcoord:bottomrightcoord - ignored -- from wikiCalc
@@ -335,6 +328,8 @@ SocialCalc.ParseSheetSave = function(savedsheet,sheetobj) {
    var parts=[];
    var line;
    var i, j, t, v, coord, cell, attribs, name;
+   var scc = SocialCalc.Constants;
+
    for (i=0;i<lines.length;i++) {
       line=lines[i];
       parts = line.split(":");
@@ -357,7 +352,7 @@ SocialCalc.ParseSheetSave = function(savedsheet,sheetobj) {
                      sheetobj.colattribs.hide[coord]=parts[j++];
                      break;
                   default:
-                     throw "Unknown col type item '"+t+"'";
+                     throw scc.s_pssUnknownColType+" '"+t+"'";
                      break;
                   }
                }
@@ -375,7 +370,7 @@ SocialCalc.ParseSheetSave = function(savedsheet,sheetobj) {
                      sheetobj.rowlattribs.hide[coord]=parts[j++];
                      break;
                   default:
-                     throw "Unknown row type item '"+t+"'";
+                     throw scc.s_pssUnknownRowType+" '"+t+"'";
                      break;
                   }
                }
@@ -491,7 +486,7 @@ SocialCalc.ParseSheetSave = function(savedsheet,sheetobj) {
             break;
 
          default:
-            throw "Unknown line type '"+parts[0]+"'";
+            throw scc.s_pssUnknownLineType+" '"+parts[0]+"'";
             break;
          }
       parts = null;
@@ -519,7 +514,7 @@ SocialCalc.CellFromStringParts = function(sheet, cell, parts, j) {
          case "t":
             cell.datavalue=SocialCalc.decodeFromSave(parts[j++]);
             cell.datatype="t";
-            cell.valuetype=SocialCalc.defaultvalues.textdatadefaulttype; 
+            cell.valuetype=SocialCalc.Constants.textdatadefaulttype; 
             break;
          case "vt":
             v=parts[j++];
@@ -588,7 +583,7 @@ SocialCalc.CellFromStringParts = function(sheet, cell, parts, j) {
             cell.comment=SocialCalc.decodeFromSave(parts[j++]);
             break;
          default:
-            throw "Unknown cell type item '"+t+"'";
+            throw SocialCalc.Constants.s_cfspUnknownCellType+" '"+t+"'";
             break;
          }
       }
@@ -723,7 +718,7 @@ SocialCalc.CellToString = function(sheet, cell) {
       else line += ":vt:"+cell.valuetype+":"+value;
       }
    else if (cell.datatype=="t") {
-      if (cell.valuetype==SocialCalc.defaultvalues.textdatadefaulttype)
+      if (cell.valuetype==SocialCalc.Constants.textdatadefaulttype)
          line += ":t:"+value;
       else line += ":vt:"+cell.valuetype+":"+value;
       }
@@ -760,6 +755,471 @@ SocialCalc.CellToString = function(sheet, cell) {
    if (cell.comment) line += ":comment:"+SocialCalc.encodeForSave(cell.comment);
 
    return line;
+
+   }
+
+//
+// result = SocialCalc.EncodeCellAttributes(sheet, coord)
+//
+// Returns the cell's attributes in an object, each in the following form:
+//
+//    attribname: {def: true/false, val: full-value}
+//
+
+SocialCalc.EncodeCellAttributes = function(sheet, coord) {
+
+   var value, i, b, bb;
+   var result = {};
+
+   var InitAttrib = function(name) {
+      result[name] = {def: true, val: ""};
+      }
+
+   var InitAttribs = function(namelist) {
+      for (var i=0; i<namelist.length; i++) {
+         InitAttrib(namelist[i]);
+         }
+      }
+
+   var SetAttrib = function(name, v) {
+      result[name].def = false;
+      result[name].val = v || "";
+      }
+
+   var SetAttribStar = function(name, v) {
+      if (v=="*") return;
+      result[name].def = false;
+      result[name].val = v;
+      }
+
+   var cell = sheet.GetAssuredCell(coord);
+
+   // cellformat: alignhoriz
+
+   InitAttrib("alignhoriz");
+   if (cell.cellformat) {
+      SetAttrib("alignhoriz", sheet.cellformats[cell.cellformat]);
+      }
+
+   // layout: alignvert, padtop, padright, padbottom, padleft
+
+   InitAttribs(["alignvert", "padtop", "padright", "padbottom", "padleft"]);
+   if (cell.layout) {
+      parts = sheet.layouts[cell.layout].match(/^padding:\s*(\S+)\s+(\S+)\s+(\S+)\s+(\S+);vertical-align:\s*(\S+);/);
+      SetAttribStar("padtop", parts[1]);
+      SetAttribStar("padright", parts[2]);
+      SetAttribStar("padbottom", parts[3]);
+      SetAttribStar("padleft", parts[4]);
+      SetAttribStar("alignvert", parts[5]);
+      }
+
+   // font: fontfamily, fontlook, fontsize
+
+   InitAttribs(["fontfamily", "fontlook", "fontsize"]);
+   if (cell.font) {
+      parts = sheet.fonts[cell.font].match(/^(\*|\S+? \S+?) (\S+?) (\S.*)$/);
+      SetAttribStar("fontfamily", parts[3]);
+      SetAttribStar("fontsize", parts[2]);
+      SetAttribStar("fontlook", parts[1]);
+      }
+
+   // color: textcolor
+
+   InitAttrib("textcolor");
+   if (cell.color) {
+      SetAttrib("textcolor", sheet.colors[cell.color]);
+      }
+
+   // bgcolor: bgcolor
+
+   InitAttrib("bgcolor");
+   if (cell.bgcolor) {
+      SetAttrib("bgcolor", sheet.colors[cell.bgcolor]);
+      }
+
+   // formatting: numberformat, textformat
+
+   InitAttribs(["numberformat", "textformat"]);
+   if (cell.nontextvalueformat) {
+      SetAttrib("numberformat", sheet.valueformats[cell.nontextvalueformat]);
+      }
+   if (cell.textvalueformat) {
+      SetAttrib("textformat", sheet.valueformats[cell.textvalueformat]);
+      }
+
+   // merges: colspan, rowspan
+
+   InitAttribs(["colspan", "rowspan"]);
+   SetAttrib("colspan", cell.colspan || 1);
+   SetAttrib("rowspan", cell.rowspan || 1);
+
+   // borders: bXthickness, bXstyle, bXcolor for X = t, r, b, and l
+
+   for (i=0; i<4; i++) {
+      b = "trbl".charAt(i);
+      bb = "b"+b;
+      InitAttrib(bb);
+      SetAttrib(bb, cell[bb] ? sheet.borderstyles[cell[bb]] : "");
+      InitAttrib(bb+"thickness");
+      InitAttrib(bb+"style");
+      InitAttrib(bb+"color");
+      if (cell[bb]) {
+         parts = sheet.borderstyles[cell[bb]].match(/(\S+)\s+(\S+)\s+(\S.+)/);
+         SetAttrib(bb+"thickness", parts[1]);
+         SetAttrib(bb+"style", parts[2]);
+         SetAttrib(bb+"color", parts[3]);
+         }
+      }
+ 
+   // misc: cssc, csss, mod
+
+   InitAttribs(["cssc", "csss", "mod"]);
+   SetAttrib("cssc", cell.cssc || ""); 
+   SetAttrib("csss", cell.csss || "");
+   SetAttrib("mod", cell.mod || "n");
+
+   return result;
+
+   }
+
+//
+// result = SocialCalc.EncodeSheetAttributes(sheet)
+//
+// Returns the sheet's attributes in an object, each in the following form:
+//
+//    attribname: {def: true/false, val: full-value}
+//
+
+SocialCalc.EncodeSheetAttributes = function(sheet) {
+
+   var value;
+   var attribs = sheet.attribs;
+   var result = {};
+
+   var InitAttrib = function(name) {
+      result[name] = {def: true, val: ""};
+      }
+
+   var InitAttribs = function(namelist) {
+      for (var i=0; i<namelist.length; i++) {
+         InitAttrib(namelist[i]);
+         }
+      }
+
+   var SetAttrib = function(name, v) {
+      result[name].def = false;
+      result[name].val = v || value;
+      }
+
+   var SetAttribStar = function(name, v) {
+      if (v=="*") return;
+      result[name].def = false;
+      result[name].val = v;
+      }
+
+   // sizes: colwidth, rowheight
+
+   InitAttrib("colwidth");
+   if (attribs.defaultcolwidth) {
+      SetAttrib("colwidth", attribs.defaultcolwidth);
+      }
+
+   InitAttrib("rowheight");
+   if (attribs.rowheight) {
+      SetAttrib("rowheight", attribs.defaultrowheight);
+      }
+
+   // cellformat: textalignhoriz, numberalignhoriz
+
+   InitAttrib("textalignhoriz");
+   if (attribs.defaulttextformat) {
+      SetAttrib("textalignhoriz", sheet.cellformats[attribs.defaulttextformat]);
+      }
+
+   InitAttrib("numberalignhoriz");
+   if (attribs.defaultnontextformat) {
+      SetAttrib("numberalignhoriz", sheet.cellformats[attribs.defaultnontextformat]);
+      }
+
+   // layout: alignvert, padtop, padright, padbottom, padleft
+
+   InitAttribs(["alignvert", "padtop", "padright", "padbottom", "padleft"]);
+   if (attribs.defaultlayout) {
+      parts = sheet.layouts[attribs.defaultlayout].match(/^padding:\s*(\S+)\s+(\S+)\s+(\S+)\s+(\S+);vertical-align:\s*(\S+);/);
+      SetAttribStar("padtop", parts[1]);
+      SetAttribStar("padright", parts[2]);
+      SetAttribStar("padbottom", parts[3]);
+      SetAttribStar("padleft", parts[4]);
+      SetAttribStar("alignvert", parts[5]);
+      }
+
+   // font: fontfamily, fontlook, fontsize
+
+   InitAttribs(["fontfamily", "fontlook", "fontsize"]);
+   if (attribs.defaultfont) {
+      parts = sheet.fonts[attribs.defaultfont].match(/^(\*|\S+? \S+?) (\S+?) (\S.*)$/);
+      SetAttribStar("fontfamily", parts[3]);
+      SetAttribStar("fontsize", parts[2]);
+      SetAttribStar("fontlook", parts[1]);
+      }
+
+   // color: textcolor
+
+   InitAttrib("textcolor");
+   if (attribs.defaultcolor) {
+      SetAttrib("textcolor", sheet.colors[attribs.defaultcolor]);
+      }
+
+   // bgcolor: bgcolor
+
+   InitAttrib("bgcolor");
+   if (attribs.defaultbgcolor) {
+      SetAttrib("bgcolor", sheet.colors[attribs.defaultbgcolor]);
+      }
+
+   // formatting: numberformat, textformat
+
+   InitAttribs(["numberformat", "textformat"]);
+   if (attribs.defaultnontextvalueformat) {
+      SetAttrib("numberformat", sheet.valueformats[attribs.defaultnontextvalueformat]);
+      }
+   if (attribs.defaulttextvalueformat) {
+      SetAttrib("textformat", sheet.valueformats[attribs.defaulttextvalueformat]);
+      }
+
+   return result;
+
+   }
+
+//
+// changed = SocialCalc.DecodeCellAttributes(sheet, coord, attribs, range)
+//
+// Takes cell attributes in an object, each in the following form:
+//
+//    attribname: {def: true/false, val: full-value}
+//
+// and executes sheet commands to make the actual attributes correspond.
+// Returns true if any commands were executed, false otherwise.
+//
+// If range is provided, the commands are executed on the whole range.
+//
+
+SocialCalc.DecodeCellAttributes = function(sheet, coord, newattribs, range) {
+
+   var value, b, bb;
+
+   var cell = sheet.GetAssuredCell(coord);
+
+   var changed = false;
+
+   var CheckChanges = function(attribname, oldval, cmdname) {
+      var val;
+      if (newattribs[attribname]) {
+         if (newattribs[attribname].def) {
+            val = "";
+            }
+         else {
+            val = newattribs[attribname].val;
+            }
+         if (val != (oldval || "")) {
+            DoCmd(cmdname+" "+val);
+            }
+         }
+      }
+
+   var DoCmd = function(str) {
+      sheet.ExecuteSheetCommand("set "+(range || coord)+" "+str, true);
+      changed = true;
+      }
+
+   // cellformat: alignhoriz
+
+   CheckChanges("alignhoriz", sheet.cellformats[cell.cellformat], "cellformat");
+
+   // layout: alignvert, padtop, padright, padbottom, padleft
+
+   if (!newattribs.alignvert.def || !newattribs.padtop.def || !newattribs.padright.def ||
+       !newattribs.padbottom.def || !newattribs.padleft.def) {
+      value = "padding:" +
+         (newattribs.padtop.def ? "* " : newattribs.padtop.val + " ") +
+         (newattribs.padright.def ? "* " : newattribs.padright.val + " ") +
+         (newattribs.padbottom.def ? "* " : newattribs.padbottom.val + " ") +
+         (newattribs.padleft.def ? "*" : newattribs.padleft.val) +
+         ";vertical-align:" +
+         (newattribs.alignvert.def ? "*;" : newattribs.alignvert.val+";");
+      }
+   else {
+      value = "";
+      }
+
+   if (value != (sheet.layouts[cell.layout] || "")) {
+      DoCmd("layout "+value);
+      }
+
+   // font: fontfamily, fontlook, fontsize
+
+   if (!newattribs.fontlook.def || !newattribs.fontsize.def || !newattribs.fontfamily.def) {
+      value =
+         (newattribs.fontlook.def ? "* " : newattribs.fontlook.val + " ") +
+         (newattribs.fontsize.def ? "* " : newattribs.fontsize.val + " ") +
+         (newattribs.fontfamily.def ? "*" : newattribs.fontfamily.val);
+      }
+   else {
+      value = "";
+      }
+
+   if (value != (sheet.fonts[cell.font] || "")) {
+      DoCmd("font "+value);
+      }
+
+   // color: textcolor
+
+   CheckChanges("textcolor", sheet.colors[cell.color], "color");
+
+   // bgcolor: bgcolor
+
+   CheckChanges("bgcolor", sheet.colors[cell.bgcolor], "bgcolor");
+
+   // formatting: numberformat, textformat
+
+   CheckChanges("numberformat", sheet.valueformats[cell.nontextvalueformat], "nontextvalueformat");
+
+   CheckChanges("textformat", sheet.valueformats[cell.textvalueformat], "textvalueformat");
+
+   // merges: colspan, rowspan - NOT HANDLED: IGNORED!
+
+   // borders: bX for X = t, r, b, and l; bXthickness, bXstyle, bXcolor ignored
+
+   for (i=0; i<4; i++) {
+      b = "trbl".charAt(i);
+      bb = "b"+b;
+      CheckChanges(bb, sheet.borderstyles[cell[bb]], bb);
+      }
+
+   // misc: cssc, csss, mod
+
+   CheckChanges("cssc", cell.cssc, "cssc");
+
+   CheckChanges("csss", cell.csss, "csss");
+
+   if (newattribs.mod) {
+      if (newattribs.mod.def) {
+         value = "n";
+         }
+      else {
+         value = newattribs.mod.val;
+         }
+      if (value != (cell.mod || "n")) {
+         if (value=="n") value = ""; // restrict to "y" and "" normally
+         DoCmd("mod "+value);
+         }
+      }
+
+   return changed;
+
+   }
+
+
+//
+// changed = SocialCalc.DecodeSheetAttributes(sheet, newattribs)
+//
+// Takes sheet attributes in an object, each in the following form:
+//
+//    attribname: {def: true/false, val: full-value}
+//
+// and executes sheet commands to make the actual attributes correspond.
+// Returns true if any commands were executed, false otherwise.
+//
+
+SocialCalc.DecodeSheetAttributes = function(sheet, newattribs) {
+
+   var value;
+   var attribs = sheet.attribs;
+   var changed = false;
+
+   var CheckChanges = function(attribname, oldval, cmdname) {
+      var val;
+      if (newattribs[attribname]) {
+         if (newattribs[attribname].def) {
+            val = "";
+            }
+         else {
+            val = newattribs[attribname].val;
+            }
+         if (val != (oldval || "")) {
+            DoCmd(cmdname+" "+val);
+            }
+         }
+      }
+
+   var DoCmd = function(str) {
+      sheet.ExecuteSheetCommand("set sheet "+str, true);
+      changed = true;
+      }
+
+   // sizes: colwidth, rowheight
+
+   CheckChanges("colwidth", attribs.defaultcolwidth, "defaultcolwidth");
+
+   CheckChanges("rowheight", attribs.defaultrowheight, "defaultrowheight");
+
+   // cellformat: textalignhoriz, numberalignhoriz
+
+   CheckChanges("textalignhoriz", sheet.cellformats[attribs.defaulttextformat], "defaulttextformat");
+
+   CheckChanges("numberalignhoriz", sheet.cellformats[attribs.defaultnontextformat], "defaultnontextformat");
+
+   // layout: alignvert, padtop, padright, padbottom, padleft
+
+   if (!newattribs.alignvert.def || !newattribs.padtop.def || !newattribs.padright.def ||
+       !newattribs.padbottom.def || !newattribs.padleft.def) {
+      value = "padding:" +
+         (newattribs.padtop.def ? "* " : newattribs.padtop.val + " ") +
+         (newattribs.padright.def ? "* " : newattribs.padright.val + " ") +
+         (newattribs.padbottom.def ? "* " : newattribs.padbottom.val + " ") +
+         (newattribs.padleft.def ? "*" : newattribs.padleft.val) +
+         ";vertical-align:" +
+         (newattribs.alignvert.def ? "*;" : newattribs.alignvert.val+";");
+      }
+   else {
+      value = "";
+      }
+
+   if (value != (sheet.layouts[attribs.defaultlayout] || "")) {
+      DoCmd("defaultlayout "+value);
+      }
+
+   // font: fontfamily, fontlook, fontsize
+
+   if (!newattribs.fontlook.def || !newattribs.fontsize.def || !newattribs.fontfamily.def) {
+      value =
+         (newattribs.fontlook.def ? "* " : newattribs.fontlook.val + " ") +
+         (newattribs.fontsize.def ? "* " : newattribs.fontsize.val + " ") +
+         (newattribs.fontfamily.def ? "*" : newattribs.fontfamily.val);
+      }
+   else {
+      value = "";
+      }
+
+   if (value != (sheet.fonts[attribs.defaultfont] || "")) {
+      DoCmd("defaultfont "+value);
+      }
+
+   // color: textcolor
+
+   CheckChanges("textcolor", sheet.colors[attribs.defaultcolor], "defaultcolor");
+
+   // bgcolor: bgcolor
+
+   CheckChanges("bgcolor", sheet.colors[attribs.defaultbgcolor], "defaultbgcolor");
+
+   // formatting: numberformat, textformat
+
+   CheckChanges("numberformat", sheet.valueformats[attribs.defaultnontextvalueformat], "defaultnontextvalueformat");
+
+   CheckChanges("textformat", sheet.valueformats[attribs.defaulttextvalueformat], "defaulttextvalueformat");
+
+   return changed;
 
    }
 
@@ -808,6 +1268,7 @@ SocialCalc.ExecuteSheetCommand = function(sheet, cmdstr, saveundo) {
    var attribs = sheet.attribs;
    var changes = sheet.changes;
    var cellProperties = SocialCalc.CellProperties;
+   var scc = SocialCalc.Constants;
 
    var ParseRange =
       function() {
@@ -883,7 +1344,7 @@ SocialCalc.ExecuteSheetCommand = function(sheet, cmdstr, saveundo) {
                   if (typeof num == "number") attribs[attrib] = num > 0 ? num : 1;
                   break;
                default:
-                  errortext = "Unknown sheet command: "+cmdstr;
+                  errortext = scc.s_escUnknownSheetCmd+cmdstr;
                   break;
                }
             }
@@ -1017,13 +1478,13 @@ SocialCalc.ExecuteSheetCommand = function(sheet, cmdstr, saveundo) {
                      }
                   else if (attrib=="mod") {
                      rest = rest.replace(/[^yY]/g, "").toLowerCase();
-                     cell.csss = rest;
+                     cell.mod = rest;
                      }
                   else if (attrib=="comment") {
                      cell.comment = SocialCalc.decodeFromSave(rest);
                      }
                   else {
-                     errortext = "Unknown set coord command: "+cmdstr;
+                     errortext = scc.s_escUnknownSetCoordCmd+cmdstr;
                      }
                   }
                }
@@ -1694,7 +2155,7 @@ SocialCalc.ExecuteSheetCommand = function(sheet, cmdstr, saveundo) {
          break;
 
       default:
-         errortext = "Unknown command: "+cmdstr;
+         errortext = scc.s_escUnknownCmd+cmdstr;
          break;
       }
 
@@ -1936,7 +2397,7 @@ SocialCalc.RecalcSheet = function(sheet) {
    var coord, err;
 
    sheet.checked = {};
-   sheet.attribs.circularreferencecell;
+   delete sheet.attribs.circularreferencecell;
 
    for (coord in sheet.cells) {
       if (!coord) continue;
@@ -1985,7 +2446,7 @@ SocialCalc.CheckAndCalcCell = function(sheet, coord) {
       return "";
       }
    else if (checked[coord] == 1) { // Circular reference
-      cell.errors = "Circular reference to "+coord;
+      cell.errors = SocialCalc.Constants.s_caccCircRef+coord;
       return cell.errors;
       }
 
@@ -2250,15 +2711,17 @@ SocialCalc.RenderContext = function(sheetobj) {
 
    var parts, num, s;
    var attribs = sheetobj.attribs;
+   var scc = SocialCalc.Constants;
 
    // properties:
 
    this.sheetobj = sheetobj;
    this.hideRowsCols = false; // Rendering with panes only works with "false"
+                              // !!!! Note: not implemented yet in rendering, just saved as an attribute
    this.showGrid = false;
    this.showRCHeaders = false;
-   this.rownamewidth = "30";
-   this.pixelsPerRow = SocialCalc.defaultvalues.assumedrowheight;
+   this.rownamewidth = scc.defaultRowNameWidth;
+   this.pixelsPerRow = scc.defaultAssumedRowHeight;
 
    this.cellskip = {}; // if present, coord of cell covering this cell
    this.coordToCR = {}; // for cells starting spans, coordToCR[coord]={row:row, col:col}
@@ -2275,66 +2738,72 @@ SocialCalc.RenderContext = function(sheetobj) {
 
    this.highlightTypes = // attributes to change when highlit
       {
-         cursor: {color: "#FFF", backgroundColor: "#A6A6A6"}, // {color: "#000", backgroundColor: "#BFD4F9"},
-         range: {color: "#000", backgroundColor: "#E5E5E5"}, // {color: "#000", backgroundColor: "#9DB1D6"}, //8EADE4
-         rangecorner: {color: "#000", backgroundColor: "#E5E5E5"} // {color: "#000", backgroundColor: "#9DB1D6"}
+         cursor: {style: scc.defaultHighlightTypeCursorStyle, className: scc.defaultHighlightTypeCursorClass},
+         range: {style: scc.defaultHighlightTypeRangeStyle, className: scc.defaultHighlightTypeRangeClass}
       }
 
-   this.cellIDprefix = "cell_"; // if non-null, each cell will render with an ID
+   this.cellIDprefix = scc.defaultCellIDPrefix; // if non-null, each cell will render with an ID
 
    // constants:
 
-   this.defaultfontstyle = SocialCalc.defaultvalues.defaultfontstyle;
-   this.defaultfontsize = SocialCalc.defaultvalues.defaultfontsize;
-   this.defaultfontfamily = SocialCalc.defaultvalues.defaultfontfamily;
-   this.defaultskippedcellstyle = "background-color:#CCC";
-   this.defaultpanedividerstyle = "background-color:#FFF;padding:0px;";
-   this.defaultpanedividerwidth = "2";
-   this.defaultpanedividerheight = "3";
+   this.defaultfontstyle = scc.defaultCellFontStyle;
+   this.defaultfontsize = scc.defaultCellFontSize;
+   this.defaultfontfamily = scc.defaultCellFontFamily;
 
-   this.gridCSS = "1px solid #ECECEC;";
+   this.defaultlayout = scc.defaultCellLayout;
+
+   this.defaultpanedividerwidth = scc.defaultPaneDividerWidth;
+   this.defaultpanedividerheight = scc.defaultPaneDividerHeight;
+
+   this.gridCSS = scc.defaultGridCSS;
+
+   this.commentClassName = scc.defaultCommentClass; // for cells with non-blank comments when this.showGrid is true
+   this.commentCSS = scc.defaultCommentStyle; // any combination of classnames and styles may be used
+   this.commentNoGridClassName = scc.defaultCommentNoGridClass; // for cells when this.showGrid is false
+   this.commentNoGridCSS = scc.defaultCommentNoGridStyle; // any combination of classnames and styles may be used
 
    this.classnames = // any combination of classnames and explicitStyles can be used
       {
-         colname: "",
-         rowname: "",
-         selectedcolname: "",
-         selectedrowname: "",
-         upperleft: "",
-         skippedcell: "",
-         panedivider: ""
+         colname: scc.defaultColnameClass,
+         rowname: scc.defaultRownameClass,
+         selectedcolname: scc.defaultSelectedColnameClass,
+         selectedrowname: scc.defaultSelectedRownameClass,
+         upperleft: scc.defaultUpperLeftClass,
+         skippedcell: scc.defaultSkippedCellClass,
+         panedivider: scc.defaultPaneDividerClass
       };
 
    this.explicitStyles = // these may be used so you won't need a stylesheet with the classnames
       {
-         colname: "text-align: center;color: #FFFFFF;background-color: #808080;", // background-color: #80A9F3;",
-         rowname: "text-align: right;color: #FFFFFF;background-color: #808080;", // background-color: #80A9F3;",
-         selectedcolname: "text-align: center;color: #FFFFFF;background-color: #404040;", // background-color: #394F87;",
-         selectedrowname: "text-align: right;color: #FFFFFF;background-color: #404040;", // background-color: #394F87;",
-         upperleft: "",
-         skippedcell: "background-color:#CCC",
-         panedivider: "background-color:#ECECEC;padding:0px;"
+         colname: scc.defaultColnameStyle,
+         rowname: scc.defaultRownameStyle,
+         selectedcolname: scc.defaultSelectedColnameStyle,
+         selectedrowname: scc.defaultSelectedRownameStyle,
+         upperleft: scc.defaultUpperLeftStyle,
+         skippedcell: scc.defaultSkippedCellStyle,
+         panedivider: scc.defaultPaneDividerStyle
       };
 
-   // precomputed values
+   // precomputed values, filling in defaults indicated by "*"
 
-   this.fonts=[];
+   this.fonts=[]; // for each fontnum, {style: fs, weight: fw, size: fs, family: ff}
+   this.layouts=[]; // for each layout, "padding:Tpx Rpx Bpx Lpx;vertical-align:va;"
 
    // if have a sheet object, initialize constants and precomputed values
 
    if (sheetobj) {
-      SocialCalc.PrecomputeSheetFonts(this);
+      SocialCalc.PrecomputeSheetFontsAndLayouts(this);
       this.rowpanes[0] = {first: 1, last: attribs.lastrow};
       this.colpanes[0] = {first: 1, last: attribs.lastcol};
 
       }
-   else throw "Render Context must have a sheet object";
+   else throw scc.s_rcMissingSheet;
 
    }
 
 // Methods:
 
-SocialCalc.RenderContext.prototype.PrecomputeSheetFonts = function() {SocialCalc.PrecomputeSheetFonts(this);};
+SocialCalc.RenderContext.prototype.PrecomputeSheetFontsAndLayouts = function() {SocialCalc.PrecomputeSheetFontsAndLayouts(this);};
 SocialCalc.RenderContext.prototype.CalculateCellSkipData = function() {SocialCalc.CalculateCellSkipData(this);};
 SocialCalc.RenderContext.prototype.CalculateColWidthData = function() {SocialCalc.CalculateColWidthData(this);};
 SocialCalc.RenderContext.prototype.SetRowPaneFirstLast = function(panenum, first, last) {this.rowpanes[panenum]={first:first, last:last};};
@@ -2353,17 +2822,17 @@ SocialCalc.RenderContext.prototype.RenderCell = function(rownum, colnum, rowpane
 
 // Functions:
 
-SocialCalc.PrecomputeSheetFonts = function(context) {
+SocialCalc.PrecomputeSheetFontsAndLayouts = function(context) {
 
-   var defaultfont, parts, num, s;
+   var defaultfont, parts, layoutre, dparts, sparts, num, s, i;
    var sheetobj = context.sheetobj;
    var attribs =  sheetobj.attribs;
 
    if (attribs.defaultfont) {
       defaultfont = sheetobj.fonts[attribs.defaultfont];
-      defaultfont = defaultfont.replace(/^\*/,SocialCalc.defaultvalues.defaultfontstyle);
-      defaultfont = defaultfont.replace(/(.+)\*(.+)/,"$1"+SocialCalc.defaultvalues.defaultfontsize+"$2");
-      defaultfont = defaultfont.replace(/\*$/,SocialCalc.defaultvalues.defaultfontfamily);
+      defaultfont = defaultfont.replace(/^\*/,SocialCalc.Constants.defaultCellFontStyle);
+      defaultfont = defaultfont.replace(/(.+)\*(.+)/,"$1"+SocialCalc.Constants.defaultCellFontSize+"$2");
+      defaultfont = defaultfont.replace(/\*$/,SocialCalc.Constants.defaultCellFontFamily);
       parts=defaultfont.match(/^(\S+? \S+?) (\S+?) (\S.*)$/);
       context.defaultfontstyle = parts[1];
       context.defaultfontsize = parts[2];
@@ -2378,6 +2847,28 @@ SocialCalc.PrecomputeSheetFonts = function(context) {
       parts=s.match(/^(\S+?) (\S+?) (\S+?) (\S.*)$/);
       context.fonts[num] = {style: parts[1], weight: parts[2], size: parts[3], family: parts[4]};
 
+      }
+
+   layoutre = /^padding:\s*(\S+)\s+(\S+)\s+(\S+)\s+(\S+);vertical-align:\s*(\S+);/;
+   dparts = SocialCalc.Constants.defaultCellLayout.match(layoutre); // get built-in defaults
+
+   if (attribs.defaultlayout) {
+      sparts = sheetobj.layouts[attribs.defaultlayout].match(layoutre); // get sheet defaults, if set
+      }
+   else {
+      sparts = ["", "*", "*", "*", "*", "*"];
+      }
+
+   for (num=1; num<sheetobj.layouts.length; num++) { // precompute layouts by filling in the *'s
+      s=sheetobj.layouts[num];
+      parts = s.match(layoutre);
+      for (i=1; i<=5; i++) {
+         if (parts[i]=="*") {
+            parts[i] = (sparts[i] != "*" ? sparts[i] : dparts[i]); // if *, sheet default or built-in
+            }
+         }
+      context.layouts[num] = "padding:"+parts[1]+" "+parts[2]+" "+parts[3]+" "+parts[4]+
+         ";vertical-align:"+parts[5]+";";
       }
    }
 
@@ -2434,10 +2925,10 @@ SocialCalc.CalculateColWidthData = function(context) {
    for (colpane=0; colpane<context.colpanes.length; colpane++) {
       for (colnum=context.colpanes[colpane].first; colnum<=context.colpanes[colpane].last; colnum++) {
          colname=SocialCalc.rcColname(colnum);
-         colwidth = sheetobj.colattribs.width[colname] || sheetobj.attribs.defaultcolwidth || SocialCalc.defaultvalues.defaultcolwidth;
+         colwidth = sheetobj.colattribs.width[colname] || sheetobj.attribs.defaultcolwidth || SocialCalc.Constants.defaultColWidth;
          if (colwidth=="blank" || colwidth=="auto") colwidth="";
          context.colwidth[colnum]=colwidth+"";
-         totalwidth+=colwidth ? (colwidth-0) : 10;
+         totalwidth+=(colwidth && ((colwidth-0)>0)) ? (colwidth-0) : 10;
          }
       }
    context.totalwidth = totalwidth;
@@ -2729,7 +3220,7 @@ SocialCalc.RenderCell = function(context, rownum, colnum, rowpane, colpane, noEl
       }
 
    sheetattribs=sheetobj.attribs;
-   scdefaults=SocialCalc.defaultvalues;
+   scc=SocialCalc.Constants;
 
    if (cell.colspan>1) {
       span=1;
@@ -2759,16 +3250,24 @@ SocialCalc.RenderCell = function(context, rownum, colnum, rowpane, colpane, noEl
 
    num=cell.layout || sheetattribs.defaultlayout;
    if (num) {
-      stylestr+=sheetobj.layouts[num];
+      stylestr+=context.layouts[num]; // use precomputed layout with "*"'s filled in
       }
    else {
-      stylestr+=SocialCalc.defaultvalues.defaultlayout;
+      stylestr+=scc.defaultCellLayout;
       }
 
    num=cell.font || sheetattribs.defaultfont;
    if (num) { // get expanded font strings in context
       t = context.fonts[num]; // do each - plain "font:" style sets all sorts of other values, too (Safari font-stretch problem on cssText)
       stylestr+="font-style:"+t.style+";font-weight:"+t.weight+";font-size:"+t.size+";font-family:"+t.family+";";
+      }
+   else {
+      if (scc.defaultCellFontSize) {
+         stylestr+="font-size:"+scc.defaultCellFontSize+";";
+         }
+      if (scc.defaultCellFontFamily) {
+         stylestr+="font-family:"+scc.defaultCellFontFamily+";";
+         }
       }
 
    num=cell.color || sheetattribs.defaultcolor;
@@ -2805,8 +3304,8 @@ SocialCalc.RenderCell = function(context, rownum, colnum, rowpane, colpane, noEl
    num=cell.br;
    if (num) stylestr+="border-right:"+sheetobj.borderstyles[num]+";";
    else if (context.showGrid) {
-      if (context.CellInPane(rownum, colnum+1, rowpane, colpane))
-         t=SocialCalc.crToCoord(colnum+1, rownum);
+      if (context.CellInPane(rownum, colnum+(cell.colspan || 1), rowpane, colpane))
+         t=SocialCalc.crToCoord(colnum+(cell.colspan || 1), rownum);
       else t="nomatch";
       if (context.cellskip[t]) t=context.cellskip[t];
       if (!sheetobj.cells[t] || !sheetobj.cells[t].bl)
@@ -2816,8 +3315,8 @@ SocialCalc.RenderCell = function(context, rownum, colnum, rowpane, colpane, noEl
    num=cell.bb;
    if (num) stylestr+="border-bottom:"+sheetobj.borderstyles[num]+";";
    else if (context.showGrid) {
-      if (context.CellInPane(rownum+1, colnum, rowpane, colpane))
-         t=SocialCalc.crToCoord(colnum, rownum+1);
+      if (context.CellInPane(rownum+(cell.rowspan || 1), colnum, rowpane, colpane))
+         t=SocialCalc.crToCoord(colnum, rownum+(cell.rowspan || 1));
       else t="nomatch";
       if (context.cellskip[t]) t=context.cellskip[t];
       if (!sheetobj.cells[t] || !sheetobj.cells[t].bt)
@@ -2827,7 +3326,20 @@ SocialCalc.RenderCell = function(context, rownum, colnum, rowpane, colpane, noEl
    num=cell.bl;
    if (num) stylestr+="border-left:"+sheetobj.borderstyles[num]+";";
 
-   if (cell.comment) stylestr+="background-repeat:no-repeat;background-position:top right;background-image:url(images/sc-commentbg.gif);";
+   if (cell.comment) {
+      if (context.showGrid) {
+         if (context.commentClassName) {
+            result.className = (result.className ? result.className+" " : "") + context.commentClassName;
+            }
+         stylestr+=context.commentCSS;
+         }
+      else {
+         if (context.commentNoGridClassName) {
+            result.className = (result.className ? result.className+" " : "") + context.commentNoGridClassName;
+            }
+         stylestr+=context.commentNoGridCSS;
+         }
+      }
 
    result.style.cssText=stylestr;
 
@@ -2836,11 +3348,12 @@ SocialCalc.RenderCell = function(context, rownum, colnum, rowpane, colpane, noEl
    // csss needs to be parsed into pieces to override just the attributes specified, not all with assignment to cssText.
    // cssc just needs to set the className.
 
-   if (context.highlights[coord]) { // this is a highlit cell: Override style appropriately
-      t = context.highlightTypes[context.highlights[coord]]; // get type definition
-      for (stylename in t) {
-         result.style[stylename] = t[stylename];
+   t = context.highlights[coord];
+   if (t) { // this is a highlit cell: Override style appropriately
+      if (context.highlightTypes[t].className) {
+         result.className = (result.className ? result.className+" " : "") + context.highlightTypes[t].className;
          }
+      SocialCalc.setStyles(result, context.highlightTypes[t].style);
       }
 
    return result;
@@ -2875,6 +3388,7 @@ SocialCalc.CreatePseudoElement = function() {
 
 SocialCalc.rcColname = function(c) {
    if (c > 702) c = 702; // maximum number of columns - ZZ
+   if (c < 1) c = 1;
    var collow = (c - 1) % 26 + 65;
    var colhigh = Math.floor((c - 1) / 26);
    if (colhigh)
@@ -3088,6 +3602,52 @@ SocialCalc.LookupElement = function (element, array) {
    }
 
 //
+// AssignID(obj, element, id) - Optionally assigns an ID with a prefix to the element
+//
+
+SocialCalc.AssignID = function (obj, element, id) {
+
+   if (obj.idPrefix) { // Object must have a non-empty idPrefix attribute
+      element.id = obj.idPrefix + id;
+      }
+
+   }
+
+//
+// SocialCalc.GetCellContents(sheetobj, coord)
+//
+// Returns the contents (value, formula, constant, etc.) of a cell
+// with appropriate prefix ("'", "=", etc.)
+//
+
+SocialCalc.GetCellContents = function(sheetobj, coord) {
+
+   var result = "";
+   var cellobj = sheetobj.cells[coord];
+   if (cellobj) {
+      switch (cellobj.datatype) {
+         case "v":
+            result = cellobj.datavalue+"";
+            break;
+         case "t":
+            result = "'"+cellobj.datavalue;
+            break;
+         case "f":
+            result = "="+cellobj.formula;
+            break;
+         case "c":
+            result = cellobj.formula;
+            break;
+         default:
+            break;
+         }
+      }
+
+   return result;
+
+   }
+
+//
 // Routines translated from the SocialCalc 1.1.0 Perl code:
 //
 // (Makes use of the FormatNumber JavaScript code translated from the Perl.)
@@ -3111,7 +3671,7 @@ SocialCalc.FormatValueForDisplay = function(sheetobj, value, cr, linkstyle) {
    var displayvalue;
 
    var sheetattribs=sheetobj.attribs;
-   var scdefaults=SocialCalc.defaultvalues;
+   var scc=SocialCalc.Constants;
 
    var cell=sheetobj.cells[cr];
 
@@ -3126,7 +3686,7 @@ SocialCalc.FormatValueForDisplay = function(sheetobj, value, cr, linkstyle) {
    valuetype = valuetype.charAt(0);
 
    if (cell.errors || valuetype=="e") {
-      displayvalue = (cell.errors && SocialCalc.defaultvalues.expand_markup && SocialCalc.defaultvalues.expand_markup(cell.errors, sheetobj, linkstyle)) ||
+      displayvalue = (cell.errors && SocialCalc.Callbacks.expand_markup && SocialCalc.Callbacks.expand_markup(cell.errors, sheetobj, linkstyle)) ||
                         valuesubtype || "Error in cell";
       return displayvalue;
       }
@@ -3218,8 +3778,8 @@ SocialCalc.format_text_for_display = function(rawvalue, valuetype, valueformat, 
       ;
       }
    else if (valueformat=="text-wiki") { // wiki text
-      displayvalue = (SocialCalc.defaultvalues.expand_markup
-                      && SocialCalc.defaultvalues.expand_markup(displayvalue, sheetobj, linkstyle)) || // do wiki markup
+      displayvalue = (SocialCalc.Callbacks.expand_markup
+                      && SocialCalc.Callbacks.expand_markup(displayvalue, sheetobj, linkstyle)) || // do wiki markup
                      SocialCalc.special_chars("wiki-text:"+displayvalue);
       }
    else if (valueformat=="text-url") { // text is a URL for a link
@@ -3230,7 +3790,7 @@ SocialCalc.format_text_for_display = function(rawvalue, valuetype, valueformat, 
    else if (valueformat=="text-link") { // text is a URL for a link shown as Link
       dvsc = SocialCalc.special_chars(displayvalue);
       dvue = encodeURI(displayvalue);
-      displayvalue = '<a href="'+dvue+'">'+SocialCalc.defaultvalues.linkformatstring+'</a>';
+      displayvalue = '<a href="'+dvue+'">'+SocialCalc.Constants.defaultLinkFormatString+'</a>';
       }
    else if (valueformat=="text-image") { // text is a URL for an image
       dvue = encodeURI(displayvalue);
@@ -3275,6 +3835,7 @@ SocialCalc.format_text_for_display = function(rawvalue, valuetype, valueformat, 
 SocialCalc.format_number_for_display = function(rawvalue, valuetype, valueformat) {
 
    var value, valuesubtype;
+   var scc = SocialCalc.Constants;
 
    value = rawvalue-0;
 
@@ -3288,13 +3849,13 @@ SocialCalc.format_number_for_display = function(rawvalue, valuetype, valueformat
          valueformat = '[$]#,##0.00';
          }
       else if (valuesubtype=='dt') {
-         valueformat = SocialCalc.defaultvalues.defaultformatdt;
+         valueformat = scc.defaultFormatdt;
          }
       else if (valuesubtype=='d') {
-         valueformat = SocialCalc.defaultvalues.defaultformatd;
+         valueformat = scc.defaultFormatd;
          }
       else if (valuesubtype=='t') {
-         valueformat = SocialCalc.defaultvalues.defaultformatt;
+         valueformat = scc.defaultFormatt;
          }
       else if (valuesubtype=='l') {
          valueformat = 'logical';
@@ -3305,7 +3866,7 @@ SocialCalc.format_number_for_display = function(rawvalue, valuetype, valueformat
       }
 
    if (valueformat=="logical") { // do logical format
-      return value ? SocialCalc.defaultvalues.displaytrue : SocialCalc.defaultvalues.displayfalse;
+      return value ? scc.defaultDisplayTRUE : scc.defaultDisplayFALSE;
       }
 
    if (valueformat=="hidden") { // do hidden format
@@ -3399,7 +3960,7 @@ SocialCalc.DetermineValueType = function(rawvalue) {
       num = matches[2]-0;
       denom = matches[3]-0;
       if (denom > 0) {
-         value = intgr + num/denom;
+         value = intgr + (intgr < 0 ? -num/denom : num/denon);
          type = "n";
          }
       }
@@ -3439,12 +4000,13 @@ SocialCalc.default_expand_markup = function(displayvalue, sheetobj, linkstyle) {
    }
 
 //
-// result = SocialCalc.ConvertSaveToOtherFormat(savestr, outputformat)
+// result = SocialCalc.ConvertSaveToOtherFormat(savestr, outputformat, dorecalc)
 //
 // Returns a string in the specificed format: "scsave", "html", "csv", "tab" (tab delimited)
+// If dorecalc is true, performs a recalc after loading.
 //
 
-SocialCalc.ConvertSaveToOtherFormat = function(savestr, outputformat) {
+SocialCalc.ConvertSaveToOtherFormat = function(savestr, outputformat, dorecalc) {
 
    var sheet, context, clipextents, div, ele, row, col, cr, cell, str;
 
@@ -3460,6 +4022,10 @@ SocialCalc.ConvertSaveToOtherFormat = function(savestr, outputformat) {
 
    sheet = new SocialCalc.Sheet();
    sheet.ParseSheetSave(savestr);
+
+   if (dorecalc) {
+      sheet.RecalcSheet();
+      }
 
    if (sheet.copiedfrom) {
       clipextents = SocialCalc.ParseRange(sheet.copiedfrom);

@@ -35,7 +35,13 @@ SocialCalc.FormatNumber = {};
 
 SocialCalc.FormatNumber.format_definitions = {}; // Parsed formats are stored here globally
 
-// These values may be customized externally for localization
+// Most constants that are often customized for localization are in the SocialCalc.Constants module.
+// If you use this module standalone, provide at least the "FormatNumber" values.
+//
+
+// The following values may be customized externally for further localization of the format definitions themselves,
+// but that would make them incompatible with other uses and is discouraged.
+//
 
 SocialCalc.FormatNumber.separatorchar = ",";
 SocialCalc.FormatNumber.decimalchar = ".";
@@ -52,6 +58,8 @@ SocialCalc.FormatNumber.allowedcolors =
 SocialCalc.FormatNumber.alloweddates =
    {H: "h]", M: "m]", MM: "mm]", S: "s]", SS: "ss]"};
 
+// Other constants
+
 SocialCalc.FormatNumber.commands =
    {copy: 1, color: 2, integer_placeholder: 3, fraction_placeholder: 4, decimal: 5,
     currency: 6, general:7, separator: 8, date: 9, comparison: 10, section: 11, style: 12};
@@ -66,6 +74,7 @@ SocialCalc.FormatNumber.datevalues = {julian_offset: 2415019, seconds_in_a_day: 
 
 SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_string, currency_char) {
 
+   var scc = SocialCalc.Constants;
    var scfn = SocialCalc.FormatNumber;
 
    var op, operandstr, fromend, cval, operandstrlc;
@@ -88,7 +97,7 @@ SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_strin
    if (negativevalue) value = -value;
    var zerovalue = value == 0 ? 1 : 0;
 
-   currency_char = currency_char || '$';
+   currency_char = currency_char || scc.FormatNumber_DefaultCurrency;
 
    scfn.parse_format_string(scfn.format_definitions, format_string); // make sure format is parsed
    thisformat = scfn.format_definitions[format_string]; // Get format structure
@@ -249,10 +258,10 @@ SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_strin
             if ((operandstr.toLowerCase()=="am/pm" || operandstr.toLowerCase()=="a/p") && !ampmstr) {
                if (hrs >= 12) {
                   hrs -= 12;
-                  ampmstr = operandstr.toLowerCase()=="a/p" ? "P" : "PM";
+                  ampmstr = operandstr.toLowerCase()=="a/p" ? scc.FormatNumber_pm1 : scc.FormatNumber_pm; // "P" : "PM";
                   }
                else {
-                  ampmstr = operandstr.toLowerCase()=="a/p" ? "A" : "AM";
+                  ampmstr = operandstr.toLowerCase()=="a/p" ? scc.FormatNumber_am1 : scc.FormatNumber_am; // "A" : "AM";
                   }
                if (operandstr.indexOf(ampmstr)<0)
                   ampmstr = ampmstr.toLowerCase(); // have case match case in format
@@ -299,9 +308,9 @@ SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_strin
    fractionpos = 0;
    textcolor = "";
    textstyle = "";
-   separatorchar = scfn.separatorchar;
+   separatorchar = scc.FormatNumber_separatorchar;
    if (separatorchar.indexOf(" ")>=0) separatorchar = separatorchar.replace(/ /g, "&nbsp;");
-   decimalchar = scfn.decimalchar;
+   decimalchar = scc.FormatNumber_decimalchar;
    if (decimalchar.indexOf(" ")>=0) decimalchar = decimalchar.replace(/ /g, "&nbsp;");
 
    oppos = sectioninfo.sectionstart;
@@ -448,11 +457,11 @@ SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_strin
             }
          else if (operandstrlc=="ddd") {
             cval = Math.floor(rawvalue+6) % 7;
-            result += scfn.daynames3[cval];
+            result += scc.s_FormatNumber_daynames3[cval];
             }
          else if (operandstrlc=="dddd") {
             cval = Math.floor(rawvalue+6) % 7;
-            result += scfn.daynames[cval];
+            result += scc.s_FormatNumber_daynames[cval];
             }
          else if (operandstrlc=="m") {
             result += ymd.month+"";
@@ -462,13 +471,13 @@ SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_strin
             result += (cval+"").substr(2);
             }
          else if (operandstrlc=="mmm") {
-            result += scfn.monthnames3[ymd.month-1];
+            result += scc.s_FormatNumber_monthnames3[ymd.month-1];
             }
          else if (operandstrlc=="mmmm") {
-            result += scfn.monthnames[ymd.month-1];
+            result += scc.s_FormatNumber_monthnames[ymd.month-1];
             }
          else if (operandstrlc=="mmmmm") {
-            result += scfn.monthnames[ymd.month-1].charAt(0);
+            result += scc.s_FormatNumber_monthnames[ymd.month-1].charAt(0);
             }
          else if (operandstrlc=="h") {
             result += hrs+"";
@@ -807,6 +816,7 @@ SocialCalc.FormatNumber.parse_format_string = function(format_defs, format_strin
 SocialCalc.FormatNumber.parse_format_bracket = function(bracketstr) {
 
    var scfn = SocialCalc.FormatNumber;
+   var scc = SocialCalc.Constants;
 
    var bracketdata={};
    var parts;
@@ -815,10 +825,10 @@ SocialCalc.FormatNumber.parse_format_bracket = function(bracketstr) {
       bracketdata.operator = scfn.commands.currency;
       parts=bracketstr.match(/^\$(.+?)(\-.+?){0,1}$/);
       if (parts) {
-         bracketdata.operand = parts[1] || /* $WKCStrings{"currencychar"} || */ '$';
+         bracketdata.operand = parts[1] || scc.FormatNumber_defaultCurrency || '$';
          }
       else {
-         bracketdata.operand = bracketstr.substring(1) || /* $WKCStrings{"currencychar"} || */ '$';
+         bracketdata.operand = bracketstr.substring(1) || scc.FormatNumber_defaultCurrency || '$';
          }
       }
    else if (bracketstr=='?$') {
@@ -920,6 +930,11 @@ SocialCalc.FormatNumber.convert_date_julian_to_gregorian = function(juliandate) 
    }
 
 SocialCalc.intFunc = function(n) {
-   return Math.floor(n) + (n < 0 ? 1 : 0);
+   if (n < 0) {
+      return -Math.floor(-n);
+      }
+   else {
+      return Math.floor(n);
+      }
    }
 
