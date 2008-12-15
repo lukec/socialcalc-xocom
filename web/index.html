@@ -2,7 +2,7 @@
 <html>
 <head>
 <META http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>SocialCalc 0.7.6</title>
+<title>SocialCalc 0.7.9</title>
 <script type="text/javascript" src="xocom.js"></script>
 <script type="text/javascript" src="socialcalcconstants.js"></script>
 <script type="text/javascript" src="socialcalc-3.js"></script>
@@ -15,7 +15,7 @@ body, td, input, texarea {font-family:verdana,helvetica,sans-serif;font-size:sma
 .smaller {font-size:smaller;}
 </style>
 </head>
-<body style="background-color:#FFF;">
+<body style="background-color:#FFF;" onresize="spreadsheet.DoOnResize();">
 <div style="margin:8px 0px 10px 0px;">
  <div id="tableeditor" style="margin:8px 0px 10px 0px;">editor goes here</div>
 </div>
@@ -26,7 +26,7 @@ body, td, input, texarea {font-family:verdana,helvetica,sans-serif;font-size:sma
 function addmsg(str) {document.getElementById("msg").innerHTML += ", "+str;}
 function setmsg(str) {document.getElementById("msg").innerHTML = str;}
 
-   window.onerror = function(m, u, l){ addmsg(m+" at line "+l); return true;};
+   // Create the spreadsheet control, but don't initialize yet
 
    var spreadsheet = new SocialCalc.SpreadsheetControl();
 
@@ -51,15 +51,14 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
       view: "plain",
       onclick:
          function(s, t) {
-            s.views.plain.element.firstChild.style.width = s.views.plain.element.style.width;
-            s.views.plain.element.firstChild.style.height = s.views.plain.element.style.height;
-            s.views.plain.element.firstChild.innerHTML = s.CreateSheetHTML();
+            s.views.plain.element.innerHTML = s.CreateSheetHTML();
             },
       onclickFocus: true
       });
 
-   spreadsheet.views["plain"] = {name: "plain", html:
-      '<div id="%id.plainview" style="margin-right:0px;border:1px solid black;overflow:auto;">Plain View</div>'
+   spreadsheet.views["plain"] = {name: "plain",
+      divStyle: "border:1px solid black;overflow:auto;",
+      html: 'Plain View'
       };
 
    // Add Graph
@@ -70,12 +69,237 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
       ' <div style="%tbt.">&nbsp;</div>'+
       '</div>',
       view: "graph",
-      onclick: DoGraph,
+      onclick: null,
       onclickFocus: true
       });
 
-   spreadsheet.views["graph"] = {name: "graph", html:
-      '<div id="%id.graphview" style="overflow:auto;">Graph View</div>'
+   spreadsheet.views["graph"] = {name: "graph", divStyle: "overflow:auto;", values: {},
+      oncreate: function(s, viewobj) {
+         var charttypes = "Horizontal Bar:barh|Vertical Bar:barv|Line:line|Area:area|Scatter:scatter";
+
+         viewobj.values.panel = {
+            charttype: {setting: "charttype", type: "CustomDropdown", id: s.idPrefix+"charttype",
+               initialdata: charttypes},
+            charttitle: {setting: "chartitle", type: "TextField", id: s.idPrefix+"charttitle",
+               initialdata: null}
+            };
+
+         SocialCalc.SettingsControlInitializePanel(viewobj.values.panel);
+         },
+      replacements: {
+         itemtitle: {regex: /\%itemtitle\./g, replacement: 'style="padding:12px 10px 0px 10px;font-weight:bold;text-align:right;vertical-align:top;font-size:small;"'},
+         sectiontitle: {regex: /\%sectiontitle\./g, replacement: 'style="padding:16px 10px 0px 0px;font-weight:bold;vertical-align:top;font-size:small;color:#C00;"'},
+         parttitle: {regex: /\%parttitle\./g, replacement: 'style="font-weight:bold;font-size:x-small;padding:0px 0px 3px 0px;"'},
+         itembody: {regex: /\%itembody\./g, replacement: 'style="padding:12px 0px 0px 0px;vertical-align:top;font-size:small;"'},
+         bodypart: {regex: /\%bodypart\./g, replacement: 'style="padding:0px 10px 0px 0px;font-size:small;vertical-align:top;"'}
+         },
+
+      html:
+'<div id="%id.c-colorchooser" style="display:none;position:absolute;z-index:20;"></div>'+
+'<table id="%id.chartsettingstable" style="display:none;" cellspacing="0" cellpadding="0">'+
+'<table cellspacing="0" cellpadding="0">'+
+'<tr>'+
+' <td %itemtitle.><br>Chart:</td>'+
+' <td %itembody.>'+
+'   <table cellspacing="0" cellpadding="0"><tr>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Type</div>'+
+'     <select size="1">'+
+'      <option>Horizontal Bar</option>'+
+'      <option>Vertical Bar</option>'+
+'      <option>Line</option>'+
+'      <option>Area</option>'+
+'      <option>Picture</option>'+
+'      <option>Circle</option>'+
+'      <option>Scatter Plot</option>'+
+'     </select>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Title</div>'+
+'     <input type="text" size="40" value="">'+
+'    </td>'+
+'   </tr></table>'+
+' </td>'+
+'</tr>'+
+'<tr>'+
+' <td %itemtitle.><br>X-Axis:</td>'+
+' <td %itembody.>'+
+'   <table cellspacing="0" cellpadding="0"><tr>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Labels</div>'+
+'     <select size="1"><option>A4</option><option>FIRST</option></select>'+
+'     <input type="button" value="&gt;">'+
+'     <input type="text" size="6" value="">'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Minimum</div>'+
+'     <select size="1"><option>Default</option><option>Custom</option></select>'+
+'     <input type="text" size="4" value="">'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Maximum</div>'+
+'     <select size="1"><option>Default</option><option>Custom</option></select>'+
+'     <input type="text" size="4" value="">'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Name</div>'+
+'     <input type="text" size="20" value="">'+
+'    </td>'+
+'   </tr></table>'+
+' </td>'+
+'</tr>'+
+'<tr>'+
+' <td %itemtitle.><br>Y-Axis:</td>'+
+' <td %itembody.>'+
+'   <table cellspacing="0" cellpadding="0"><tr>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Minimum</div>'+
+'     <select size="1"><option>Default</option><option>Custom</option></select>'+
+'     <input type="text" size="4" value="">'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Maximum</div>'+
+'     <select size="1"><option>Default</option><option>Custom</option></select>'+
+'     <input type="text" size="4" value="">'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Name</div>'+
+'     <input type="text" size="20" value="">'+
+'    </td>'+
+'   </tr></table>'+
+' </td>'+
+'</tr>'+
+'<tr>'+
+' <td %itemtitle.><br>Series 1:</td>'+
+' <td %itembody.>'+
+'   <table cellspacing="0" cellpadding="0"><tr>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Data</div>'+
+'     <select size="1"><option>A4</option><option>FIRST</option></select>'+
+'     <input type="button" value="&gt;">'+
+'     <input type="text" size="6" value="">'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Color</div>'+
+'     <input type="text" size="6" value="">'+
+'     <span style="border:1px solid black;">&nbsp;&nbsp;&nbsp</span>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Symbol</div>'+
+'     <select size="1"><option>None</option><option>Custom</option><option>Star</option><option>Box</option></select>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Name</div>'+
+'     <input type="text" size="10" value="">'+
+'    </td>'+
+'   </tr></table>'+
+' </td>'+
+'</tr>'+
+'<tr>'+
+' <td %itemtitle.><br>Series 2:</td>'+
+' <td %itembody.>'+
+'   <table cellspacing="0" cellpadding="0"><tr>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Data</div>'+
+'     <select size="1"><option>A4</option><option>FIRST</option><option>[Blank]</option></select>'+
+'     <input type="button" value="&gt;">'+
+'     <input type="text" size="6" value="None">'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Color</div>'+
+'     <input type="text" size="6" value="">'+
+'     <span style="border:1px solid black;">&nbsp;&nbsp;&nbsp</span>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Symbol</div>'+
+'     <select size="1"><option>None</option><option>Custom</option><option>Star</option><option>Box</option></select>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Name</div>'+
+'     <input type="text" size="10" value="">'+
+'    </td>'+
+'   </tr></table>'+
+' </td>'+
+'</tr>'+
+'<tr>'+
+' <td %itemtitle.><br>Series 3:</td>'+
+' <td %itembody.>'+
+'   <table cellspacing="0" cellpadding="0"><tr>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Data</div>'+
+'     <select size="1"><option>A4</option><option>FIRST</option><option>None</option></select>'+
+'     <input type="button" value="&gt;">'+
+'     <input type="text" size="6" value="None">'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Color</div>'+
+'     <input type="text" size="6" value="">'+
+'     <span style="border:1px solid black;">&nbsp;&nbsp;&nbsp</span>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Symbol</div>'+
+'     <select size="1"><option>None</option><option>Custom</option><option>Star</option><option>Box</option></select>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Name</div>'+
+'     <input type="text" size="10" value="">'+
+'    </td>'+
+'   </tr></table>'+
+' </td>'+
+'</tr>'+
+'<tr>'+
+' <td %itemtitle.><br>Series 4:</td>'+
+' <td %itembody.>'+
+'   <table cellspacing="0" cellpadding="0"><tr>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Data</div>'+
+'     <select size="1"><option>A4</option><option>FIRST</option><option>None</option></select>'+
+'     <input type="button" value="&gt;">'+
+'     <input type="text" size="6" value="None">'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Color</div>'+
+'     <input type="text" size="6" value="">'+
+'     <span style="border:1px solid black;">&nbsp;&nbsp;&nbsp</span>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Symbol</div>'+
+'     <select size="1"><option>None</option><option>Custom</option><option>Star</option><option>Box</option></select>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Name</div>'+
+'     <input type="text" size="10" value="">'+
+'    </td>'+
+'   </tr></table>'+
+' </td>'+
+'</tr>'+
+'<tr>'+
+' <td %itemtitle.><br>Series 5:</td>'+
+' <td %itembody.>'+
+'   <table cellspacing="0" cellpadding="0"><tr>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Data</div>'+
+'     <select size="1"><option>A4</option><option>FIRST</option><option>None</option></select>'+
+'     <input type="button" value="&gt;">'+
+'     <input type="text" size="6" value="None">'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Color</div>'+
+'     <input type="text" size="6" value="">'+
+'     <span style="border:1px solid black;">&nbsp;&nbsp;&nbsp</span>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Symbol</div>'+
+'     <select size="1"><option>None</option><option>Custom</option><option>Star</option><option>Box</option></select>'+
+'    </td>'+
+'    <td %bodypart.>'+
+'     <div %parttitle.>Name</div>'+
+'     <input type="text" size="10" value="">'+
+'    </td>'+
+'   </tr></table>'+
+' </td>'+
+'</tr>'+
+'</table>'
       };
 
    // Add Help
@@ -90,17 +314,15 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
       onclickFocus: true
       });
 
-   spreadsheet.views["help"] = {name: "help", html:
-      '<div id="%id.helpview" style="overflow:auto;">Help View</div>'
+   spreadsheet.views["help"] = {name: "help",
+      divStyle: "border:1px solid black;overflow:auto;",
+      html: '<div style="padding:6px;">Help View</div>'
       };
-//   var sz = SocialCalc.GetViewportInfo();border:1px solid black;padding:4px;
 
-
-
-   // Create the Spreadsheet Control and display it
+   // Initialize the Spreadsheet Control and display it
 
    spreadsheet.InitializeSpreadsheetControl("tableeditor");
-   spreadsheet.FullRefreshAndRender();
+   spreadsheet.ExecuteCommand('redisplay', '');
 
    // Done initialization
 
@@ -114,14 +336,21 @@ function setmsg(str) {document.getElementById("msg").innerHTML = str;}
                 if (parts.sheet) {
                     spreadsheet.sheet.ResetSheet();
                     spreadsheet.ParseSheetSave(
-                    content.substring(parts.sheet.start, parts.sheet.end));
+                        content.substring(parts.sheet.start, parts.sheet.end)
+                    );
                 }
                 if (parts.edit) {
                     spreadsheet.editor.LoadEditorSettings(
-                    content.substring(parts.edit.start, parts.edit.end));
+                        content.substring(parts.edit.start, parts.edit.end)
+                    );
                 }
             }
-            spreadsheet.FullRefreshAndRender();
+            if (spreadsheet.editor.context.sheetobj.attribs.recalc=="off") {
+                spreadsheet.ExecuteCommand('redisplay', '');
+            }
+            else {
+                spreadsheet.ExecuteCommand('recalc', '');
+            }
         }
         catch (err) {
             return err
@@ -147,7 +376,7 @@ function DoGraph(objs, t) {
    var labels = [];
    var range = objs.editor.range;
 
-   var gview = objs.views.graph.element.firstChild;
+   var gview = objs.views.graph.element;
 
    if (!range.hasrange) {
       gview.innerHTML = '<div style="padding:30px;font-weight:bold;">Select a range of cells with numeric values to graph.</div>';
@@ -162,8 +391,10 @@ function DoGraph(objs, t) {
       byrow = false;
       }
 
-   maxheight = objs.height-objs.spreadsheetDiv.firstChild.offsetHeight-70;
-   totalwidth = objs.width;
+   str = "";
+
+   maxheight = (objs.height-objs.nonviewheight)-50;
+   totalwidth = objs.width-30;
    color = "#666";
 
    minval = null;
@@ -192,7 +423,7 @@ function DoGraph(objs, t) {
    minval = minval - (extra || 1);
    eachwidth = Math.floor(totalwidth / (values.length || 1))-4 || 1;
 
-   str = '<table cellspacing="0" cellpadding="0" width="'+totalwidth+'"><tr>';
+   str += '<table cellspacing="0" cellpadding="0" width="'+totalwidth+'"><tr>';
 
    for (i=0; i<values.length; i++) {
       thisbar = Math.floor((values[i]-minval)*maxheight/(maxval-minval || 1))+1;
@@ -216,10 +447,11 @@ function DoGraph(objs, t) {
 
 function DoHelp(s, t) {
 
-   var hview = s.views.help.element.firstChild;
+   var hview = s.views.help.element;
 
    var str =
 'HELP TEXT FOLLOWED BY ABOUT TEXT AND LEGAL INFORMATION:<br><br> '+
+'Version 0.7.9<br><br> '+
 '<i>This is an early version of a spreadsheet built on SocialCalc JavaScript code, still in development. '+
 '</i> '+
 '<br><br> '+
@@ -266,7 +498,7 @@ function DoHelp(s, t) {
 'There is a simple Sugar-like interface for accessing some of the editing API through tabs, buttons, and drop downs. '+
 '<br><br> '+
 'The program maintains an undo stack accessed through the Undo and Redo buttons on the left of the Edit tab toolbar. '+
-'Right now the stack saves all operations and grows until you quit. '+
+'Right now the stack saves up to 100 steps. '+
 '<br><br> '+
 'There is a <b>Format</b> tab for accessing all of the format settings, both for individual cells as well '+
 'as for the sheet-wide defaults that are applied to cells without explicit settings for that attribute. '+
@@ -295,6 +527,9 @@ function DoHelp(s, t) {
 'Tab-delimited format is what a browser and Excel put on the clipboard when you select and then copy cells in a table. '+
 'The Clipboard tab also supports CSV format and the SocialCalc Save format (useful for copying from one sheet to another). '+
 'Reloading from the SocialCalc Save format must be in correct format -- errors can cause SocialCalc to behave badly. '+
+'Pressing Ctrl-V when on the Edit tab and not editing a cell assumes that Tab-delimited data is on the regular '+
+'clipboard, loads it into the SocialCalc clipboard, and then "pastes" it starting at the current cell. '+
+'This is an easy way to copy data from a web page into a spreadsheet. '+
 '<br><br> '+
 'Right now this code is mainly being developed to run under control of a native Python '+
 'application running on the OLPC XO. '+
@@ -303,7 +538,7 @@ function DoHelp(s, t) {
 'When the program encounters an error, it may display a message at the bottom of the screen. '+
 'You can click on the message to erase it. '+
 '<br><br> '+
-'Comments can be sent to "comments" at "bricklin.com". '+
+'Comments can be sent to "socialcalc" at "softwaregarden.com". '+
 '<br><br> '+
 '<hr> '+
 '<b>FUNCTION HELP</b> '+
@@ -539,9 +774,7 @@ function DoHelp(s, t) {
 'Socialtext, SocialCalc, and the Socialtext logo and Dreamcatcher are trademarks of Socialtext, Inc.<br> '+
 'Dan Bricklin\'s is a registered trademark of Daniel Bricklin.</span>';
 
-   hview.style.width = s.views.help.element.style.width;
-   hview.style.height = s.views.help.element.style.height;
-   hview.innerHTML = str;
+   hview.firstChild.innerHTML = str;
 
    }
 

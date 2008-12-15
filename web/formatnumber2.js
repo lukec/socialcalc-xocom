@@ -7,7 +7,7 @@
 // All Rights Reserved.
 //
 // The contents of this file are subject to the Artistic License 2.0; you may not
-// use this file except in compliance with the License. You may obtain a copy of 
+// use this file except in compliance with the License. You may obtain a copy of
 // the License at http://socialcalc.org/licenses/al-20/.
 //
 // Some of the other files in the SocialCalc package are licensed under
@@ -258,10 +258,10 @@ SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_strin
             if ((operandstr.toLowerCase()=="am/pm" || operandstr.toLowerCase()=="a/p") && !ampmstr) {
                if (hrs >= 12) {
                   hrs -= 12;
-                  ampmstr = operandstr.toLowerCase()=="a/p" ? scc.FormatNumber_pm1 : scc.FormatNumber_pm; // "P" : "PM";
+                  ampmstr = operandstr.toLowerCase()=="a/p" ? scc.s_FormatNumber_pm1 : scc.s_FormatNumber_pm; // "P" : "PM";
                   }
                else {
-                  ampmstr = operandstr.toLowerCase()=="a/p" ? scc.FormatNumber_am1 : scc.FormatNumber_am; // "A" : "AM";
+                  ampmstr = operandstr.toLowerCase()=="a/p" ? scc.s_FormatNumber_am1 : scc.s_FormatNumber_am; // "A" : "AM";
                   }
                if (operandstr.indexOf(ampmstr)<0)
                   ampmstr = ampmstr.toLowerCase(); // have case match case in format
@@ -401,13 +401,17 @@ SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_strin
          }
 
       else if (op == scfn.commands.general) { // insert "General" conversion
-         var gvalue = rawvalue-0; // make sure it's numeric
+
+         // *** Cut down number of significant digits to avoid floating point artifacts:
+
+         var factor = Math.floor(Math.LOG10E * Math.log(value)); // get integer magnitude as a power of 10
+         factor = Math.pow(10, 13-factor); // turn into scaling factor
+         value = Math.floor(factor * value + 0.5)/factor; // scale positive value, round, undo scaling
+
          if (negativevalue) {
             result += "-";
-            negativevalue = 0;
-            gvalue = -gvalue;
             }
-         strvalue = gvalue+""; // convert original value to string
+         strvalue = value+""; // convert original value to string
          if (strvalue.indexOf("e")>=0) { // converted to scientific notation
             result += strvalue;
             continue;

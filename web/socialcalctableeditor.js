@@ -14,22 +14,22 @@ LEGAL NOTICES REQUIRED BY THE COMMON PUBLIC ATTRIBUTION LICENSE:
 
 EXHIBIT A. Common Public Attribution License Version 1.0.
 
-The contents of this file are subject to the Common Public Attribution License Version 1.0 (the 
-"License"); you may not use this file except in compliance with the License. You may obtain a copy 
-of the License at http://socialcalc.org. The License is based on the Mozilla Public License Version 1.1 but 
-Sections 14 and 15 have been added to cover use of software over a computer network and provide for 
-limited attribution for the Original Developer. In addition, Exhibit A has been modified to be 
+The contents of this file are subject to the Common Public Attribution License Version 1.0 (the
+"License"); you may not use this file except in compliance with the License. You may obtain a copy
+of the License at http://socialcalc.org. The License is based on the Mozilla Public License Version 1.1 but
+Sections 14 and 15 have been added to cover use of software over a computer network and provide for
+limited attribution for the Original Developer. In addition, Exhibit A has been modified to be
 consistent with Exhibit B.
 
-Software distributed under the License is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY 
-KIND, either express or implied. See the License for the specific language governing rights and 
+Software distributed under the License is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
+KIND, either express or implied. See the License for the specific language governing rights and
 limitations under the License.
 
 The Original Code is SocialCalc JavaScript TableEditor.
 
 The Original Developer is the Initial Developer.
 
-The Initial Developer of the Original Code is Socialtext, Inc. All portions of the code written by 
+The Initial Developer of the Original Code is Socialtext, Inc. All portions of the code written by
 Socialtext, Inc., are Copyright (c) Socialtext, Inc. All Rights Reserved.
 
 Contributor: Dan Bricklin.
@@ -38,7 +38,7 @@ Contributor: Dan Bricklin.
 EXHIBIT B. Attribution Information
 
 When the TableEditor is producing and/or controlling the display the Graphic Image must be
-displayed on the screen visible to the user in a manner comparable to that in the 
+displayed on the screen visible to the user in a manner comparable to that in the
 Original Code. The Attribution Phrase must be displayed as a "tooltip" or "hover-text" for
 that image. The image must be linked to the Attribution URL so as to access that page
 when clicked. If the user interface includes a prominent "about" display which includes
@@ -59,8 +59,8 @@ Graphic Image: The contents of the sc-logo.gif file in the Original Code or
 a suitable replacement from http://www.socialcalc.org/licenses specified as
 being for SocialCalc.
 
-Display of Attribution Information is required in Larger Works which are defined 
-in the CPAL as a work which combines Covered Code or portions thereof with code 
+Display of Attribution Information is required in Larger Works which are defined
+in the CPAL as a work which combines Covered Code or portions thereof with code
 not governed by the terms of the CPAL.
 
 */
@@ -107,7 +107,7 @@ SocialCalc.TableEditor = function(context) {
 
    var scc = SocialCalc.Constants;
 
-   // properties:
+   // Properties:
 
    this.context = context; // editing context
    this.toplevel = null; // top level HTML element for this table editor
@@ -125,10 +125,12 @@ SocialCalc.TableEditor = function(context) {
 
    this.logo = null;
 
-   // dynamic properties:
+   // Dynamic properties:
 
-   this.timeout = null; // if non-null, timer id
+   this.timeout = null; // if non-null, timer id for position calculations
+   this.busy = false; // true when executing command, calculating, etc.
    this.ensureecell = false; // if true, ensure ecell is visible after timeout
+   this.deferredCommands = []; // commands to execute after busy
 
    this.gridposition = null; // screen coords of full grid
    this.headposition = null; // screen coords of upper left of grid within header rows
@@ -153,34 +155,106 @@ SocialCalc.TableEditor = function(context) {
 
    this.workingvalues = {}; // values used during keyboard editing, etc.
 
-   // constants:
+   // Constants:
 
    this.imageprefix = scc.defaultImagePrefix; // URL prefix for images (e.g., "/images/sc")
    this.idPrefix = scc.defaultTableEditorIDPrefix;
    this.pageUpDnAmount = scc.defaultPageUpDnAmount; // number of rows to move cursor on PgUp/PgDn keys (numeric)
 
-   // callbacks
+   // Callbacks
+
+   // recalcFunction: if present, function(editor) {...}, called to do a recalc
+   // Default (sheet.RecalcSheet) does all the right stuff.
 
    this.recalcFunction = function(editor) {
       if (editor.context.sheetobj.RecalcSheet) {
-         editor.context.sheetobj.RecalcSheet();
-         editor.EditorRenderSheet();
-         editor.SchedulePositionCalculations();
+         editor.context.sheetobj.RecalcSheet(SocialCalc.EditorSheetStatusCallback, editor);
          }
       else return null;
-      }; // if present, function(editor) {...}
+      };
+
+   // ctrlkeyFunction: if present, function(editor, charname) {...}, called to handle ctrl-V, etc., at top level
+   // Returns true (pass through for continued processing) or false (stop processing this key).
+
+   this.ctrlkeyFunction = function(editor, charname) {
+
+      var ta, cell, position;
+
+      switch (charname) {
+         case "[ctrl-v]":
+            ta = editor.pasteTextarea;
+            ta.value = "";
+            cell=SocialCalc.GetEditorCellElement(editor, editor.ecell.row, editor.ecell.col);
+            if (cell) {
+               position = SocialCalc.GetElementPosition(cell.element);
+               ta.style.left = (position.left-1)+"px";
+               ta.style.top = (position.top-1)+"px";
+               }
+            ta.style.display = "block";
+            ta.focus();
+            window.setTimeout(function() {
+               var s = SocialCalc.GetSpreadsheetControlObject();
+               var editor = s.editor;
+               var ta = editor.pasteTextarea;
+               var value = ta.value;
+               ta.style.display = "none";
+               var cmd = "loadclipboard "+
+                  SocialCalc.encodeForSave(SocialCalc.ConvertOtherFormatToSave(value, "tab"))+"\npaste "+
+                     editor.ecell.coord+" all";
+               editor.EditorScheduleSheetCommands(cmd, true);
+               }, 200);
+            return true;
+
+         default:
+            break;
+            }
+      return true;
+      };
+
+   // Set sheet's status callback:
+
+   context.sheetobj.statuscallback = SocialCalc.EditorSheetStatusCallback;
+   context.sheetobj.statuscallbackparams = this; // this object: the table editor object
+
+
+   // StatusCallback: all values are called at appropriate times, add with unique name, delete when done
+   //
+   // Each value must be an object in the form of:
+   //
+   //    func: function(editor, status, arg, params) {...},
+   //    params: params value to call func with
+   //
+   // The values for status and arg are:
+   //
+   //    all the SocialCalc RecalcSheet statuscallbacks, including:
+   //
+   //       calccheckdone, calclist length
+   //       calcorder, {coord: coord, total: celllist length, count: count}
+   //       calcstep, {coord: coord, total: calclist length, count: count}
+   //       calcfinished, time in milliseconds
+   //
+   //    the command callbacks, like cmdstart and cmdend
+   //    cmdendnorender
+   //
+   //    calcstart, null
+   //    moveecell, new ecell coord
+   //    rangechange, "coord:coord" or "coord" or ""
+   //
+
+   this.StatusCallback = {};
+
 
    this.MoveECellCallback = {}; // all values are called with editor as arg; add with unique name, delete when done
    this.RangeChangeCallback = {}; // all values are called with editor as arg; add with unique name, delete when done
    this.SettingsCallbacks = {}; // See SocialCalc.SaveEditorSettings
 
-   // set initial cursor
+   // Set initial cursor
 
    this.ecell = {coord: "A1", row: 1, col: 1};
    context.highlights.hascursor = true;
    context.highlights[this.ecell.coord] = "cursor";
 
-   // initialize range data
+   // Initialize range data
    // Range has at least hasrange (true/false).
    // It may also have: anchorcoord, anchorrow, anchorcol, top, bottom, left, and right.
 
@@ -197,6 +271,19 @@ SocialCalc.TableEditor.prototype.SaveEditorSettings = function() {return SocialC
 SocialCalc.TableEditor.prototype.LoadEditorSettings = function(str, flags) {return SocialCalc.LoadEditorSettings(this, str, flags);};
 
 SocialCalc.TableEditor.prototype.EditorRenderSheet = function() {SocialCalc.EditorRenderSheet(this);};
+SocialCalc.TableEditor.prototype.EditorScheduleSheetCommands = function(cmdstr) {SocialCalc.EditorScheduleSheetCommands(this, cmdstr);};
+SocialCalc.TableEditor.prototype.ScheduleSheetCommands = function(cmdstr, saveundo) {
+   this.context.sheetobj.ScheduleSheetCommands(cmdstr, saveundo);
+   };
+SocialCalc.TableEditor.prototype.SheetUndo = function() {
+   this.context.sheetobj.SheetUndo();
+   };
+SocialCalc.TableEditor.prototype.SheetRedo = function() {
+   this.context.sheetobj.SheetRedo();
+   };
+SocialCalc.TableEditor.prototype.EditorStepSet = function(status, arg) {SocialCalc.EditorStepSet(this, status, arg);};
+SocialCalc.TableEditor.prototype.GetStatuslineString = function(status, arg, params) {return SocialCalc.EditorGetStatuslineString(this, status, arg, params);};
+
 SocialCalc.TableEditor.prototype.EditorMouseRegister = function() {return SocialCalc.EditorMouseRegister(this);};
 SocialCalc.TableEditor.prototype.EditorMouseUnregister = function() {return SocialCalc.EditorMouseUnregister(this);};
 SocialCalc.TableEditor.prototype.EditorMouseRange = function(coord) {return SocialCalc.EditorMouseRange(this, coord);};
@@ -218,12 +305,15 @@ SocialCalc.TableEditor.prototype.RangeRemove = function() {SocialCalc.RangeRemov
 
 SocialCalc.TableEditor.prototype.FitToEditTable = function() {SocialCalc.FitToEditTable(this);};
 SocialCalc.TableEditor.prototype.CalculateEditorPositions = function() {SocialCalc.CalculateEditorPositions(this);};
+SocialCalc.TableEditor.prototype.ScheduleRender = function() {SocialCalc.ScheduleRender(this);};
+SocialCalc.TableEditor.prototype.DoRenderStep = function() {SocialCalc.DoRenderStep(this);};
 SocialCalc.TableEditor.prototype.SchedulePositionCalculations = function() {SocialCalc.SchedulePositionCalculations(this);};
 SocialCalc.TableEditor.prototype.DoPositionCalculations = function() {SocialCalc.DoPositionCalculations(this);};
-SocialCalc.TableEditor.prototype.CalculateRowPositions = function(panenum, result) {return SocialCalc.CalculateRowPositions(this,  panenum, result);};
-SocialCalc.TableEditor.prototype.CalculateColPositions = function(panenum, result) {return SocialCalc.CalculateColPositions(this,  panenum, result);};
+SocialCalc.TableEditor.prototype.CalculateRowPositions = function(panenum, positions, sizes) {return SocialCalc.CalculateRowPositions(this,  panenum, positions, sizes);};
+SocialCalc.TableEditor.prototype.CalculateColPositions = function(panenum, positions, sizes) {return SocialCalc.CalculateColPositions(this,  panenum, positions, sizes);};
 
 SocialCalc.TableEditor.prototype.ScrollRelative = function(vertical, amount) {SocialCalc.ScrollRelative(this, vertical, amount);};
+SocialCalc.TableEditor.prototype.ScrollRelativeBoth = function(vamount, hamount) {SocialCalc.ScrollRelativeBoth(this, vamount, hamount);};
 SocialCalc.TableEditor.prototype.PageRelative = function(vertical, direction) {SocialCalc.PageRelative(this, vertical, direction);};
 SocialCalc.TableEditor.prototype.LimitLastPanes = function() {SocialCalc.LimitLastPanes(this);};
 
@@ -254,7 +344,6 @@ SocialCalc.CreateTableEditor = function(editor, width, height) {
    AssignID(editor, editor.griddiv, "griddiv");
 
    editor.FitToEditTable();
-   editor.context.CalculateColWidthData();
 
    editor.EditorRenderSheet();
 
@@ -268,7 +357,7 @@ SocialCalc.CreateTableEditor = function(editor, width, height) {
    editor.horizontaltablecontrol.CreateTableControl();
    AssignID(editor, editor.horizontaltablecontrol.main, "tablecontrolh");
 
-   var table, tbody, tr, td, img, anchor;
+   var table, tbody, tr, td, img, anchor, ta;
 
    table = document.createElement("table");
    editor.layouttable = table;
@@ -307,9 +396,23 @@ SocialCalc.CreateTableEditor = function(editor, width, height) {
    editor.inputEcho = new SocialCalc.InputEcho(editor);
    AssignID(editor, editor.inputEcho.main, "inputecho");
 
+   ta = document.createElement("textarea");
+   SocialCalc.setStyles(ta, "display:none;position:absolute;height:1px;width:1px;opacity:0;filter:alpha(opacity=0);");
+   ta.value = "";
+   editor.pasteTextarea = ta;
+   AssignID(editor, editor.pasteTextarea, "pastetextarea");
+
+   editor.toplevel.appendChild(editor.pasteTextarea);
+
    SocialCalc.MouseWheelRegister(editor.toplevel, {WheelMove: SocialCalc.EditorProcessMouseWheel, editor: editor});
 
    SocialCalc.KeyboardSetFocus(editor);
+
+   // do status reporting things
+
+   SocialCalc.EditorSheetStatusCallback(null, "startup", null, editor);
+
+   // done
 
    return editor.toplevel;
 
@@ -328,20 +431,20 @@ SocialCalc.ResizeTableEditor = function(editor, width, height) {
    editor.width = width;
    editor.height = height;
 
+   editor.toplevel.style.width = width+"px";
+   editor.toplevel.style.height = height+"px";
+
    editor.tablewidth = width - scc.defaultTableControlThickness;
    editor.tableheight = height - scc.defaultTableControlThickness;
    editor.griddiv.style.width=editor.tablewidth+"px";
    editor.griddiv.style.height=editor.tableheight+"px";
 
-   editor.FitToEditTable();
-   editor.context.CalculateColWidthData();
-
-   editor.EditorRenderSheet();
-
    editor.verticaltablecontrol.main.style.height = editor.tableheight + "px";
    editor.horizontaltablecontrol.main.style.width = editor.tablewidth + "px";
 
-   editor.SchedulePositionCalculations();
+   editor.FitToEditTable();
+
+   editor.ScheduleRender();
 
    return;
 
@@ -494,9 +597,308 @@ SocialCalc.EditorRenderSheet = function(editor) {
    editor.fullgrid = editor.context.RenderSheet(editor.fullgrid);
    if (editor.ecell) editor.SetECellHeaders("selected");
 
+   SocialCalc.AssignID(editor, editor.fullgrid, "fullgrid"); // give it an id
+
    editor.EditorMouseRegister();
 
    }
+
+//
+// EditorScheduleSheetCommands(cmdstr)
+//
+
+SocialCalc.EditorScheduleSheetCommands = function(editor, cmdstr) {
+
+   if (editor.state!="start") { // ignore commands if editing a cell
+      return;
+      }
+
+   if (editor.busy) { // hold off on commands if doing one
+      editor.deferredCommands.push(cmdstr);
+      return;
+      }
+
+   switch (cmdstr) {
+      case "recalc":
+      case "redisplay":
+         editor.context.sheetobj.ScheduleSheetCommands(cmdstr, false);
+         break;
+
+      case "undo":
+         editor.SheetUndo();
+         break;
+
+      case "redo":
+         editor.SheetRedo();
+         break;
+
+      default:
+         editor.context.sheetobj.ScheduleSheetCommands(cmdstr, true);
+         break;
+      }
+   }
+
+
+//
+// EditorSheetStatusCallback(recalcdata, status, arg, editor)
+//
+// Called during recalc, executing commands, etc.
+//
+
+SocialCalc.EditorSheetStatusCallback = function(recalcdata, status, arg, editor) {
+
+   var f, cell;
+   var sheetobj = editor.context.sheetobj;
+
+   var signalstatus = function(s) {
+      for (f in editor.StatusCallback) {
+         if (editor.StatusCallback[f].func) {
+            editor.StatusCallback[f].func(editor, s, arg, editor.StatusCallback[f].params);
+            }
+         }
+      }
+
+   switch (status) {
+
+      case "startup":
+         break;
+
+      case "cmdstart":
+         editor.busy = true;
+         sheetobj.celldisplayneeded = "";
+         break;
+
+      case "cmdend":
+         signalstatus(status);
+
+         if (sheetobj.changedrendervalues) {
+            editor.context.PrecomputeSheetFontsAndLayouts();
+            editor.context.CalculateCellSkipData();
+            sheetobj.changedrendervalues = false;
+            }
+
+         if (sheetobj.celldisplayneeded && !sheetobj.renderneeded) {
+            cr = SocialCalc.coordToCr(sheetobj.celldisplayneeded);
+            cell = SocialCalc.GetEditorCellElement(editor, cr.row, cr.col);
+            editor.ReplaceCell(cell, cr.row, cr.col);
+            }
+
+         editor.DisplayCellContents(); // make sure up to date
+
+         if (editor.deferredCommands.length) {
+            editor.busy = false;
+            editor.EditorScheduleSheetCommands(editor.deferredCommands.shift());
+            return;
+            }
+
+         if (sheetobj.attribs.needsrecalc &&
+               (sheetobj.attribs.recalc!="off" || sheetobj.recalconce)
+               && editor.recalcFunction) {
+            editor.FitToEditTable();
+            sheetobj.renderneeded = false; // recalc will force a render
+            if (sheetobj.recalconce) delete sheetobj.recalconce; // only do once
+            editor.recalcFunction(editor);
+            }
+         else {
+            if (sheetobj.renderneeded) {
+               editor.FitToEditTable();
+               sheetobj.renderneeded = false;
+               editor.ScheduleRender();
+               }
+            else {
+               editor.busy = false;
+               signalstatus("cmdendnorender");
+               }
+            }
+         return;
+
+      case "calcstart":
+         editor.busy = true;
+         break;
+
+      case "calccheckdone":
+      case "calcorder":
+      case "calcstep":
+      case "calcloading":
+         break;
+
+      case "calcfinished":
+         signalstatus(status);
+         editor.ScheduleRender();
+         return;
+
+      case "schedrender":
+         editor.busy = true; // in case got here without cmd or recalc
+         break;
+
+      case "renderdone":
+         break;
+
+      case "schedposcalc":
+         editor.busy = true; // in case got here without cmd or recalc
+         break;
+
+      case "doneposcalc":
+         if (editor.deferredCommands.length) {
+            signalstatus(status);
+            editor.busy = false;
+            editor.EditorScheduleSheetCommands(editor.deferredCommands.shift());
+            }
+         else {
+            editor.busy = false;
+            signalstatus(status);
+            }
+         return;
+
+      default:
+addmsg("Unknown status: "+status);
+         break;
+
+      }
+
+   signalstatus(status);
+
+   return;
+
+   }
+
+// Timer-driven steps for use with SocialCalc.EditorSheetStatusCallback
+
+SocialCalc.EditorStepInfo = {
+//   status: "", // saved value to pass to callback
+   editor: null // for callback
+//   arg: null, // for callback
+//   timerobj: null
+   };
+
+/*
+SocialCalc.EditorStepSet = function(editor, status, arg) {
+   var esi = SocialCalc.EditorStepInfo;
+addmsg("step: "+status);
+   if (esi.timerobj) {
+alert("Already waiting. Old/new: "+esi.status+"/"+status);
+      }
+   esi.editor = editor;
+   esi.status = status;
+   esi.timerobj = window.setTimeout(SocialCalc.EditorStepDone, 1);
+   }
+
+SocialCalc.EditorStepDone = function() {
+   var esi = SocialCalc.EditorStepInfo;
+   esi.timerobj = null;
+   SocialCalc.EditorSheetStatusCallback(null, esi.status, null, esi.editor);
+   }
+*/
+
+//
+// str = SocialCalc.EditorGetStatuslineString(editor, status, arg, params)
+//
+// Assumes params is an object where it can use "calculating" and "command"
+// to keep track of state.
+// Returns string for status line.
+//
+
+SocialCalc.EditorGetStatuslineString = function(editor, status, arg, params) {
+
+   var sstr, progress, coord, circ, r, c, cell, sum, ele;
+
+   progress = "";
+
+   switch (status) {
+      case "moveecell":
+      case "rangechange":
+      case "startup":
+         break;
+      case "cmdstart":
+         params.command = true;
+         document.body.style.cursor = "progress";
+         editor.griddiv.style.cursor = "progress";
+         progress = "Executing...";
+         break;
+      case "cmdend":
+         params.command = false;
+         break;
+      case "schedrender":
+         progress = "Displaying...";
+         break;
+      case "renderdone":
+         progress = " ";
+         break;
+      case "schedposcalc":
+         progress = "Displaying...";
+         break;
+      case "cmdendnorender":
+      case "doneposcalc":
+         document.body.style.cursor = "default";
+         editor.griddiv.style.cursor = "default";
+         break;
+      case "calcorder":
+         progress = "Ordering..."+Math.floor(100*arg.count/(arg.total||1))+"%";
+         break;
+      case "calcstep":
+         progress = "Calculating..."+Math.floor(100*arg.count/(arg.total||1))+"%";
+         break;
+      case "calcloading":
+         progress = "Calculating... Loading Sheet: "+arg.sheetname;
+         break;
+      case "calcstart":
+         params.calculating = true;
+         document.body.style.cursor = "progress";
+         editor.griddiv.style.cursor = "progress"; // griddiv has an explicit cursor style
+         progress = "Calculation start...";
+         break;
+      case "calccheckdone":
+         break;
+      case "calcfinished":
+         params.calculating = false;
+         break;
+      default:
+         progress = status;
+         break;
+      }
+
+   if (!progress && params.calculating) {
+      progress = "Calculating...";
+      }
+
+   // if there is a range, calculate sum (not during busy times)
+   if (!params.calculating && !params.command && !progress && editor.range.hasrange && (editor.range.left!=editor.range.right || editor.range.top!=editor.range.bottom)) {
+      sum = 0;
+      for (r=editor.range.top; r <= editor.range.bottom; r++) {
+         for (c=editor.range.left; c <= editor.range.right; c++) {
+            cell = editor.context.sheetobj.cells[SocialCalc.crToCoord(c, r)];
+            if (!cell) continue;
+            if (cell.valuetype && cell.valuetype.charAt(0)=="n") {
+               sum += cell.datavalue-0;
+               }
+            }
+         }
+
+      coord = SocialCalc.crToCoord(editor.range.left, editor.range.top) + ":" +
+         SocialCalc.crToCoord(editor.range.right, editor.range.bottom);
+      progress = coord + " (" + (editor.range.right-editor.range.left+1) + "x" + (editor.range.bottom-editor.range.top+1) +
+                 ") SUM=" + sum + " " + progress;
+      }
+   sstr = editor.ecell.coord+" &nbsp; "+progress;
+
+   if (!params.calculating && editor.context.sheetobj.attribs.needsrecalc=="yes") {
+      sstr += ' &nbsp; <span style="color:#999;">(Recalc needed)</span>';
+      }
+
+   circ = editor.context.sheetobj.attribs.circularreferencecell;
+   if (circ) {
+      circ = circ.replace(/\|/, " referenced by ");
+      sstr += ' &nbsp; <span style="color:red;">Circular reference: ' + circ + '</span>';
+      }
+
+   return sstr;
+
+   }
+
+
+//
+// Mouse stuff
+//
 
 SocialCalc.EditorMouseInfo = {
 
@@ -623,7 +1025,7 @@ SocialCalc.ProcessEditorMouseDown = function(e) {
    range = editor.range;
    result = SocialCalc.GridMousePosition(editor, clientX, clientY);
 
-   if (result.rowheader) return; // not on a cell or col header
+   if (!result || result.rowheader) return; // not on a cell or col header
    mouseinfo.editor = editor; // remember for later
 
    if (result.colheader && result.coltoresize) { // col header - do drag resize
@@ -735,7 +1137,7 @@ SocialCalc.ProcessEditorMouseMove = function(e) {
    element = mouseinfo.element;
 
    result = SocialCalc.GridMousePosition(editor, clientX, clientY); // get cell with move
-   if (!result.coord) return;
+   if (!result || !result.coord) return;
 
    if (result.coord!=mouseinfo.mouselastcoord) {
       if (!e.shiftKey && !editor.range.hasrange) {
@@ -774,6 +1176,8 @@ SocialCalc.ProcessEditorMouseUp = function(e) {
    element = mouseinfo.element;
 
    result = SocialCalc.GridMousePosition(editor, clientX, clientY); // get cell with up
+
+   if (!result) return;
 
    if (!result.coord) result.coord = editor.ecell.coord;
 
@@ -920,7 +1324,7 @@ SocialCalc.ProcessEditorColsizeMouseUp = function(e) {
    var newsize = (editor.context.colwidth[mouseinfo.mouseresizecolnum]-0) + (clientX - mouseinfo.mousedownclientx);
    if (newsize < SocialCalc.Constants.defaultMinimumColWidth) newsize = SocialCalc.Constants.defaultMinimumColWidth;
 
-   editor.context.sheetobj.ExecuteSheetCommand("set "+mouseinfo.mouseresizecol+" width "+newsize, true);
+   editor.EditorScheduleSheetCommands("set "+mouseinfo.mouseresizecol+" width "+newsize, true);
 
    if (editor.timeout) window.clearTimeout(editor.timeout);
    editor.timeout = window.setTimeout(SocialCalc.FinishColsize, 1); // wait - Firefox 2 has a bug otherwise with next mousedown
@@ -939,11 +1343,9 @@ SocialCalc.FinishColsize = function() {
    editor.toplevel.removeChild(mouseinfo.mouseresizedisplay);
    mouseinfo.mouseresizedisplay = null;
 
-   editor.FitToEditTable();
-   editor.context.PrecomputeSheetFontsAndLayouts();
-   editor.context.CalculateColWidthData();
-   editor.EditorRenderSheet();
-   editor.SchedulePositionCalculations();
+//   editor.FitToEditTable();
+//   editor.EditorRenderSheet();
+//   editor.SchedulePositionCalculations();
 
    mouseinfo.editor = null;
 
@@ -979,7 +1381,7 @@ SocialCalc.ProcessEditorDblClick = function(e) {
    editor = mobj.editor;
 
    result = SocialCalc.GridMousePosition(editor, clientX, clientY);
-   if (!result.coord) return; // not within cell area - ignore
+   if (!result || !result.coord) return; // not within cell area - ignore
 
    mouseinfo.editor = editor; // remember for later
    mouseinfo.element = ele;
@@ -1053,7 +1455,15 @@ SocialCalc.EditorProcessKey = function(editor, ch, e) {
                }
             return false;
             }
-         if ((ch.length>1 && ch.substr(0,1)=="[") || ch.length==0) return true; // some control key
+
+         if ((ch.length>1 && ch.substr(0,1)=="[") || ch.length==0) { // some control key
+            if (editor.ctrlkeyFunction && ch.length>0) {
+               return editor.ctrlkeyFunction(editor, ch);
+               }
+            else {
+               return true;
+               }
+            }
          if (!editor.ecell) return true; // no ecell
          if (!editor.inputBox) return true; // no inputBox so no editing
          editor.state = "input";
@@ -1129,7 +1539,6 @@ SocialCalc.EditorProcessKey = function(editor, ch, e) {
 
       case "inputboxdirect":
          inputtext = editor.inputBox.GetText(); // should not get here if no inputBox
-         if (editor.inputBox.skipOne) return false; // ignore a key already handled
          if (ch=="[esc]" || ch=="[enter]" || ch=="[tab]") {
             editor.inputBox.Blur();
             editor.inputBox.ShowInputBox(false);
@@ -1172,7 +1581,7 @@ SocialCalc.EditorDisplayCellContents = function(editor) {
 
 SocialCalc.EditorSaveEdit = function(editor) {
 
-   var result, cell, valueinfo, fch, type, value, oldvalue, cmdline, errortext;
+   var result, cell, valueinfo, fch, type, value, oldvalue, cmdline;
 
    var sheetobj = editor.context.sheetobj;
    var wval = editor.workingvalues;
@@ -1211,15 +1620,14 @@ SocialCalc.EditorSaveEdit = function(editor) {
          }
       }
 
-   cmdline = "set "+wval.ecoord+" "+type+" "+value;
-   errortext = sheetobj.ExecuteSheetCommand(cmdline, true);
-//!!!!!:
-   if (errortext) alert(errortext);
+   if (type.charAt(0)=="t") { // text
+      value = SocialCalc.encodeForSave(value); // newlines, :, and \ are escaped
+      }
 
-   cell=SocialCalc.GetEditorCellElement(editor, wval.erow, wval.ecol);
-   editor.ReplaceCell(cell, wval.erow, wval.ecol);
-   editor.SchedulePositionCalculations();
-   if (sheetobj.attribs.needsrecalc && editor.recalcFunction) editor.recalcFunction(editor);
+   cmdline = "set "+wval.ecoord+" "+type+" "+value;
+   editor.EditorScheduleSheetCommands(cmdline);
+
+   return;
 
    }
 
@@ -1240,29 +1648,20 @@ SocialCalc.EditorApplySetCommandsToRange = function(editor, cmd) {
    if (range.hasrange) {
       coord = SocialCalc.crToCoord(range.left, range.top)+":"+SocialCalc.crToCoord(range.right, range.bottom);
       line = "set "+coord+" "+cmd;
-      errortext = sheetobj.ExecuteSheetCommand(line, true);
-      for (row=range.top; row<=range.bottom; row++) {
-         for (col=range.left; col<=range.right; col++) {
-            cell=SocialCalc.GetEditorCellElement(editor, row, col);
-            editor.ReplaceCell(cell, row, col);
-            }
-         }
+      errortext = editor.EditorScheduleSheetCommands(line, true);
       }
    else {
       line = "set "+ecell.coord+" "+cmd;
-      errortext = sheetobj.ExecuteSheetCommand(line, true);
-      cell=SocialCalc.GetEditorCellElement(editor, ecell.row, ecell.col);
-      editor.ReplaceCell(cell, ecell.row, ecell.col);
+      errortext = editor.EditorScheduleSheetCommands(line, true);
       }
 
    editor.DisplayCellContents();
 
-   editor.SchedulePositionCalculations();
-   if (sheetobj.attribs.needsrecalc && editor.recalcFunction) editor.recalcFunction(editor);
-
    }
 
 SocialCalc.EditorProcessMouseWheel = function(event, delta, mousewheelinfo, wobj) {
+
+   if (wobj.functionobj.editor.busy) return; // ignore if busy
 
    if (delta > 0) {
       wobj.functionobj.editor.ScrollRelative(true, -1);
@@ -1281,7 +1680,7 @@ SocialCalc.EditorProcessMouseWheel = function(event, delta, mousewheelinfo, wobj
 // If in colheader, will return coltoresize if on appropriate place in col header.
 //
 
-SocialCalc.GridMousePosition = function(editor, clientX, clientY) { 
+SocialCalc.GridMousePosition = function(editor, clientX, clientY) {
 
    var row, col, colpane;
    var result = {};
@@ -1479,15 +1878,20 @@ SocialCalc.MoveECell = function(editor, newcell) {
    editor.UpdateCellCSS(cell, editor.ecell.row, editor.ecell.col);
    editor.SetECellHeaders("selected");
 
-   if (editor.timeout) {
-      editor.ensureecell = true; // wait for timeout
+   if (editor.busy) {
+      editor.ensureecell = true; // wait for when not busy
       }
    else {
+      editor.ensureecell = false;
       editor.EnsureECellVisible();
       }
 
    for (f in editor.MoveECellCallback) { // let others know
       editor.MoveECellCallback[f](editor);
+      }
+
+   for (f in editor.StatusCallback) {
+      editor.StatusCallback[f].func(editor, "moveecell", newcell, editor.StatusCallback[f].params);
       }
 
    return newcell;
@@ -1496,25 +1900,28 @@ SocialCalc.MoveECell = function(editor, newcell) {
 
 SocialCalc.EnsureECellVisible = function(editor) {
 
-   var amount = 0;
+   var vamount = 0;
+   var hamount = 0;
+
    if (editor.ecell.row > editor.lastnonscrollingrow) {
       if (editor.ecell.row < editor.firstscrollingrow) {
-         amount = editor.ecell.row - editor.firstscrollingrow;
+         vamount = editor.ecell.row - editor.firstscrollingrow;
          }
       else if (editor.ecell.row > editor.lastvisiblerow) {
-         amount = editor.ecell.row - editor.lastvisiblerow;
+         vamount = editor.ecell.row - editor.lastvisiblerow;
          }
-      if (amount!=0) editor.ScrollRelative(true, amount);
-      }   
-   amount = 0;
+      }
    if (editor.ecell.col > editor.lastnonscrollingcol) {
       if (editor.ecell.col < editor.firstscrollingcol) {
-         amount = editor.ecell.col - editor.firstscrollingcol;
+         hamount = editor.ecell.col - editor.firstscrollingcol;
          }
       else if (editor.ecell.col > editor.lastvisiblecol) {
-         amount = editor.ecell.col- editor.lastvisiblecol;
+        hamount = editor.ecell.col- editor.lastvisiblecol;
          }
-      if (amount!=0) editor.ScrollRelative(false, amount);
+      }
+
+   if (vamount!=0 || hamount!=0) {
+      editor.ScrollRelativeBoth(vamount, hamount);
       }
 
    }
@@ -1573,6 +1980,8 @@ SocialCalc.SetECellHeaders = function(editor, selected) {
          if (headercell) {
             if (context.classnames) headercell.className=context.classnames[selected+"rowname"];
             if (context.explicitStyles) headercell.style.cssText=context.explicitStyles[selected+"rowname"];
+            headercell.style.verticalAlign="top"; // to get around Safari making top of centered row number be
+                                                  // considered top of row (and can't get <row> position in Safari)
             }
          }
       rowindex += last - first + 1 + 1;
@@ -1698,6 +2107,16 @@ SocialCalc.RangeExtend = function(editor, ecoord) {
       editor.RangeChangeCallback[f](editor);
       }
 
+   // create range/coord string and do status callback
+
+   coord = SocialCalc.crToCoord(editor.range.left, editor.range.top);
+   if (editor.range.left!=editor.range.right || editor.range.top!=editor.range.bottom) { // more than one cell
+      coord += ":" + SocialCalc.crToCoord(editor.range.right, editor.range.bottom);
+      }
+   for (f in editor.StatusCallback) {
+      editor.StatusCallback[f].func(editor, "rangechange", coord, editor.StatusCallback[f].params);
+      }
+
    return;
 
    }
@@ -1734,6 +2153,10 @@ SocialCalc.RangeRemove = function(editor) {
 
    for (f in editor.RangeChangeCallback) { // let others know
       editor.RangeChangeCallback[f](editor);
+      }
+
+   for (f in editor.StatusCallback) {
+      editor.StatusCallback[f].func(editor, "rangechange", "", editor.StatusCallback[f].params);
       }
 
    return;
@@ -1811,10 +2234,7 @@ SocialCalc.CalculateEditorPositions = function(editor) {
 
    editor.rowpositions = [];
    for (rowpane=0; rowpane<editor.context.rowpanes.length; rowpane++) {
-      editor.CalculateRowPositions(rowpane, editor.rowpositions);
-      for (i=editor.context.rowpanes[rowpane].first; i<editor.context.rowpanes[rowpane].last-1; i++) {
-         editor.rowheight[i] = editor.rowpositions[i+1] - editor.rowpositions[i];
-         }
+      editor.CalculateRowPositions(rowpane, editor.rowpositions, editor.rowheight);
       }
    for (i=0; i<editor.rowpositions.length; i++) {
       if (editor.rowpositions[i]>editor.gridposition.top+editor.tableheight) break;
@@ -1823,11 +2243,7 @@ SocialCalc.CalculateEditorPositions = function(editor) {
 
    editor.colpositions = [];
    for (colpane=0; colpane<editor.context.colpanes.length; colpane++) {
-      editor.CalculateColPositions(colpane, editor.colpositions);
-      for (i=editor.context.colpanes[colpane].first; i<editor.context.colpanes[colpane].last; i++) {
-         editor.colwidth[i] = editor.colpositions[i+1] - editor.colpositions[i];
-         }
-      editor.colwidth[i] = editor.context.colwidth[i]-0;
+      editor.CalculateColPositions(colpane, editor.colpositions, editor.colwidth);
       }
    for (i=0; i<editor.colpositions.length; i++) {
       if (editor.colpositions[i]>editor.gridposition.left+editor.tablewidth) break;
@@ -1850,23 +2266,52 @@ SocialCalc.CalculateEditorPositions = function(editor) {
    }
 
 //
-// SchedulePositionCalculations(editor)
+// ScheduleRender(editor)
 //
-// Set a timeout to allow for background layout and rendering by the browser after which to update
-// editor visuals, sliders, etc.
+// Do a series of timeouts to render the sheet, wait for background layout and
+// rendering by the browser, and then update editor visuals, sliders, etc.
 //
-// Note: Only call this after the DOM objects have been modified and are being (or have been) rendered!
+
+SocialCalc.ScheduleRender = function(editor) {
+
+   if (editor.timeout) window.clearTimeout(editor.timeout); // in case called more than once, just use latest
+
+   SocialCalc.EditorSheetStatusCallback(null, "schedrender", null, editor);
+   SocialCalc.EditorStepInfo.editor = editor;
+   editor.timeout = window.setTimeout(SocialCalc.DoRenderStep, 1);
+
+   }
+
+// DoRenderStep()
+//
+
+SocialCalc.DoRenderStep = function() {
+
+   var editor = SocialCalc.EditorStepInfo.editor;
+
+   editor.timeout = null;
+
+   editor.EditorRenderSheet();
+
+   SocialCalc.EditorSheetStatusCallback(null, "renderdone", null, editor);
+
+   SocialCalc.EditorSheetStatusCallback(null, "schedposcalc", null, editor);
+
+   editor.timeout = window.setTimeout(SocialCalc.DoPositionCalculations, 1);
+
+   }
+
+//
+// SocialCalc.SchedulePositionCalculations(editor)
 //
 
 SocialCalc.SchedulePositionCalculations = function(editor) {
 
-   // Set a timeout in a short amount of time to relinquish the thread to something else and hopefully
-   // get things rendered. After that, use a closure to do the actual recalculation.
-   // Hopefully, a single timer event like this will not leak memory, even in old versions of IE.
+   SocialCalc.EditorStepInfo.editor = editor;
 
-   if (editor.timeout) window.clearTimeout(editor.timeout); // in case called more than once, just use latest
+   SocialCalc.EditorSheetStatusCallback(null, "schedposcalc", null, editor);
 
-   editor.timeout = window.setTimeout(function(){SocialCalc.DoPositionCalculations(editor);}, 1);
+   editor.timeout = window.setTimeout(SocialCalc.DoPositionCalculations, 1);
 
    }
 
@@ -1877,7 +2322,9 @@ SocialCalc.SchedulePositionCalculations = function(editor) {
 // Note: Only call this after the DOM objects have been modified and rendered!
 //
 
-SocialCalc.DoPositionCalculations = function(editor) {
+SocialCalc.DoPositionCalculations = function() {
+
+   var editor = SocialCalc.EditorStepInfo.editor;
 
    editor.timeout = null;
 
@@ -1885,7 +2332,9 @@ SocialCalc.DoPositionCalculations = function(editor) {
    editor.verticaltablecontrol.PositionTableControlElements();
    editor.horizontaltablecontrol.PositionTableControlElements();
 
-   if (editor.ensureecell && editor.ecell) {
+   SocialCalc.EditorSheetStatusCallback(null, "doneposcalc", null, editor);
+
+   if (editor.ensureecell && editor.ecell && !editor.busy) { // could be busy if deferred cmd to execute
       editor.ensureecell = false;
       editor.EnsureECellVisible(); // this could cause another redisplay
       }
@@ -1895,7 +2344,7 @@ SocialCalc.DoPositionCalculations = function(editor) {
 
    }
 
-SocialCalc.CalculateRowPositions = function(editor, panenum, result) {
+SocialCalc.CalculateRowPositions = function(editor, panenum, positions, sizes) {
 
    var toprow, rowpane, rownum, offset, trowobj, cellposition;
 
@@ -1921,18 +2370,21 @@ SocialCalc.CalculateRowPositions = function(editor, panenum, result) {
       offset++;
       cellposition = SocialCalc.GetElementPosition(trowobj.firstChild);
 
-// Safari has problem: If a cell in the row is high, cell 1 is centered and it returns top of centered part 
+// Safari has problem: If a cell in the row is high, cell 1 is centered and it returns top of centered part
 // but if you get position of row element, it always returns the same value (not the row's)
 // So we require row number to be vertical aligned to top
 
-      if (!result[rownum]) result[rownum] = cellposition.top; // first one takes precedence
+      if (!positions[rownum]) {
+         positions[rownum] = cellposition.top; // first one takes precedence
+         sizes[rownum] = trowobj.firstChild.offsetHeight;
+         }
       }
 
-   return result;
+   return;
 
    }
 
-SocialCalc.CalculateColPositions = function(editor, panenum, result) {
+SocialCalc.CalculateColPositions = function(editor, panenum, positions, sizes) {
 
    var leftcol, colpane, colnum, offset, trowobj, cellposition;
 
@@ -1956,11 +2408,16 @@ SocialCalc.CalculateColPositions = function(editor, panenum, result) {
    offset = 0;
    for (colnum=context.colpanes[colpane].first; colnum<=context.colpanes[colpane].last; colnum++) {
       cellposition = SocialCalc.GetElementPosition(trowobj.childNodes[leftcol+offset]);
+      if (!positions[colnum]) {
+         positions[colnum] = cellposition.left; // first one takes precedence
+         if (trowobj.childNodes[leftcol+offset]) {
+            sizes[colnum] = trowobj.childNodes[leftcol+offset].offsetWidth;
+            }
+         }
       offset++;
-      if (!result[colnum]) result[colnum] = cellposition.left; // first one takes precedence
       }
 
-   return result;
+   return;
 
    }
 
@@ -1971,37 +2428,61 @@ SocialCalc.CalculateColPositions = function(editor, panenum, result) {
 
 SocialCalc.ScrollRelative = function(editor, vertical, amount) {
 
-   var panes=vertical ? "rowpanes" : "colpanes";
-   var context=editor.context;
-   var plen=context[panes].length;
-   var limit = plen>1 ? context[panes][plen-2].last+1 : 1; // don't scroll past here
-
-   if (context[panes][plen-1].first+amount < limit) { // limit amount
-      amount = (-context[panes][context[panes].length-1].first) + limit;
-      }
-
-   if (amount==1 && vertical) { // special case moves of 1 to do special scrolling code
-      editor.ScrollTableUpOneRow();
-      if (editor.ecell) editor.SetECellHeaders("selected");
-      }
-   else if (amount==-1 && vertical) {
-      editor.ScrollTableDownOneRow();
-      if (editor.ecell) editor.SetECellHeaders("selected");
-      }
-   else if (amount==0) {
-      ; // do nothing
+   if (vertical) {
+      editor.ScrollRelativeBoth(amount, 0);
       }
    else {
-      context[panes][context[panes].length-1].first += amount;
-      context[panes][context[panes].length-1].last += amount;
-      editor.FitToEditTable();
-      context.CalculateColWidthData();
-      editor.EditorRenderSheet();
+      editor.ScrollRelativeBoth(0, amount);
       }
-
-   editor.SchedulePositionCalculations();
+   return;
 
    }
+
+// ScrollRelativeBoth(editor, vamount, hamount)
+//
+// Does both with one render
+
+SocialCalc.ScrollRelativeBoth = function(editor, vamount, hamount) {
+
+   var context=editor.context;
+
+   var vplen=context.rowpanes.length;
+   var vlimit = vplen>1 ? context.rowpanes[vplen-2].last+1 : 1; // don't scroll past here
+   if (context.rowpanes[vplen-1].first+vamount < vlimit) { // limit amount
+      vamount = (-context.rowpanes[vplen-1].first) + vlimit;
+      }
+
+   var hplen=context.colpanes.length;
+   var hlimit = hplen>1 ? context.colpanes[hplen-2].last+1 : 1; // don't scroll past here
+   if (context.colpanes[hplen-1].first+hamount < hlimit) { // limit amount
+      hamount = (-context.colpanes[hplen-1].first) + hlimit;
+      }
+
+   if ((vamount==1 || vamount==-1) && hamount==0) { // special case quick scrolls
+      if (vamount==1) {
+         editor.ScrollTableUpOneRow();
+         }
+      else {
+         editor.ScrollTableDownOneRow();
+         }
+      if (editor.ecell) editor.SetECellHeaders("selected");
+      editor.SchedulePositionCalculations();
+      return;
+      }
+
+   // Do a gross move and render
+
+   if (vamount!=0 || hamount!=0) {
+      context.rowpanes[vplen-1].first += vamount;
+      context.rowpanes[vplen-1].last += vamount;
+      context.colpanes[hplen-1].first += hamount;
+      context.colpanes[hplen-1].last += hamount;
+      editor.FitToEditTable();
+      editor.ScheduleRender();
+      }
+
+   }
+
 
 // PageRelative(editor, vertical, direction)
 //
@@ -2045,9 +2526,7 @@ SocialCalc.PageRelative = function(editor, vertical, direction) {
    lastpane.last = newfirst+1;
    editor.LimitLastPanes();
    editor.FitToEditTable();
-   context.CalculateColWidthData();
-   editor.EditorRenderSheet();
-   editor.SchedulePositionCalculations();
+   editor.ScheduleRender();
 
    }
 
@@ -2094,7 +2573,7 @@ SocialCalc.ScrollTableUpOneRow = function(editor) {
    context.rowpanes[rowpane].first++;
    context.rowpanes[rowpane].last++;
    editor.FitToEditTable();
-   context.CalculateColWidthData(); // !!! Maybe this should be done a little later?
+   context.CalculateColWidthData(); // Just in case, since normally done in RenderSheet
 
    newbottomrow = context.RenderRow(context.rowpanes[rowpane].last, rowpane);
    tbodyobj.appendChild(newbottomrow);
@@ -2170,7 +2649,7 @@ SocialCalc.ScrollTableDownOneRow = function(editor) {
    context.rowpanes[rowpane].first--;
    context.rowpanes[rowpane].last--;
    editor.FitToEditTable();
-   context.CalculateColWidthData(); //!!! Later????
+   context.CalculateColWidthData(); // Just in case, since normally done in RenderSheet
 
    newrow = context.RenderRow(context.rowpanes[rowpane].first, rowpane);
    tbodyobj.insertBefore(newrow, tbodyobj.childNodes[toprow]);
@@ -2229,29 +2708,6 @@ SocialCalc.ScrollTableDownOneRow = function(editor) {
    return tableobj;
    }
 
-SocialCalc.ScrollTableLeftOneCol = function(editor) {
-
-   var context=editor.context;
-
-   context.colpanes[context.colpanes.length-1].first++;
-   context.colpanes[context.colpanes.length-1].last++;
-   editor.FitToEditTable();
-   context.CalculateColWidthData();
-
-   return editor.EditorRenderSheet();
-   }
-
-SocialCalc.ScrollTableRightOneCol = function(editor) {
-
-   var context=editor.context;
-
-   context.colpanes[context.colpanes.length-1].first--;
-   context.colpanes[context.colpanes.length-1].last--;
-   editor.FitToEditTable();
-   context.CalculateColWidthData();
-
-   return editor.EditorRenderSheet();
-   }
 
 // *************************************
 //
@@ -2262,7 +2718,7 @@ SocialCalc.ScrollTableRightOneCol = function(editor) {
 // the keyboard code, etc.
 //
 // You can use this inside a formula bar control of some sort.
-// You create this after you have created a table editor object (but not necessarily 
+// You create this after you have created a table editor object (but not necessarily
 // done the CreateTableEditor method).
 //
 // When the user starts typing text, or double-clicks on a cell, this object
@@ -2283,15 +2739,10 @@ SocialCalc.InputBox = function(element, editor) {
 
    editor.inputBox = this;
 
-   element.onclick = SocialCalc.InputBoxOnClick;
-
-   // The following are used to deal with behavior in some versions of Firefox:
-   element.onkeypress = SocialCalc.InputBoxOnKeyPress;
-   element.onkeyup = SocialCalc.InputBoxOnKeyUp;
-   this.skipOne = false; // used by EditorProcessKey
+   element.onmousedown = SocialCalc.InputBoxOnMouseDown;
 
    editor.MoveECellCallback.formulabar = function(e){
-      if (e.state!="start") return;
+      if (e.state!="start") return; // if not in normal keyboard mode don't replace formula bar
       editor.inputBox.DisplayCellContents(e.ecell.coord);
       };
    }
@@ -2355,13 +2806,13 @@ SocialCalc.InputBoxFocus = function(inputbox) {
    };
 
 //
-// SocialCalc.InputBoxOnClick(e)
+// SocialCalc.InputBoxOnMouseDown(e)
 //
 // This is called when the input box gets the focus. It then responds to keystrokes
 // and pass them off to SocialCalc.ProcessKey, but in a different editing state.
 //
 
-SocialCalc.InputBoxOnClick = function(e) {
+SocialCalc.InputBoxOnMouseDown = function(e) {
 
    var editor = SocialCalc.Keyboard.focusTable; // get TableEditor doing keyboard stuff
    if (!editor) return true; // we're not handling it -- let browser do default
@@ -2387,47 +2838,8 @@ SocialCalc.InputBoxOnClick = function(e) {
       case "inputboxdirect":
          break;
       }
-
    }
 
-SocialCalc.InputBoxOnKeyPress = function(e) {
-
-   var editor = SocialCalc.Keyboard.focusTable; // get TableEditor doing keyboard stuff
-   if (!editor) return true; // we're not handling it -- let browser do default
-
-   // This is to deal with a behavior of some versions of Firefox...!!!!
-   // It seems that an input element does not propagate onkeypress of up and down arrows to
-   // the normal keypress handler on another element.
-
-   if (e && e.which!=undefined && // not IE
-      (e.keyCode==38||e.keyCode==40) && // is one of the characters that are a problem
-      (e.keyCode!=e.charCode) && (e.charCode!=undefined)) { // but not Safari nor Opera
-      SocialCalc.ProcessKey(e.keyCode==38?"[aup]":"[adown]", e); // process it now
-      if (editor.state=="start") {
-         editor.state = "skip-and-start"; // and skip it where we will get it later
-         }
-      else {
-         editor.inputBox.skipOne = true; // skip it in formula bar -- already handled
-         }
-      return false;
-      };
-
-   return true;
-
-   }
-
-SocialCalc.InputBoxOnKeyUp = function(e) {
-
-   var editor = SocialCalc.Keyboard.focusTable; // get TableEditor doing keyboard stuff
-   if (!editor) return true; // we're not handling it -- let browser do default
-
-   // This is to deal with a behavior of some versions of Firefox...!!!!
-   // It seems that an input element does not propagate onkeypress of up and down arrows to
-   // the normal keypress handler on another element.
-
-   editor.inputBox.skipOne = false; // make sure skipping is off
-
-   }
 
 // *************************************
 //
@@ -2663,7 +3075,9 @@ SocialCalc.CreateTableControl = function(control) {
    TooltipRegister(control.paneslider, "paneslider", vh);
 
    functions = {MouseDown:SocialCalc.TCPSDragFunctionStart,
-                    MouseMove: SocialCalc.TCPSDragFunctionMove, MouseUp: SocialCalc.TCPSDragFunctionStop};
+                    MouseMove: SocialCalc.TCPSDragFunctionMove,
+                    MouseUp: SocialCalc.TCPSDragFunctionStop,
+                    Disabled: function() {return control.editor.busy;}};
 
    functions.control = control; // make sure this is there
 
@@ -2687,8 +3101,9 @@ SocialCalc.CreateTableControl = function(control) {
              normalstyle: "backgroundImage:url("+imageprefix+"-less-"+vh+"n.gif);",
              downstyle: "backgroundImage:url("+imageprefix+"-less-"+vh+"d.gif);",
              hoverstyle: "backgroundImage:url("+imageprefix+"-less-"+vh+"h.gif);"};
-   functions = {MouseDown:function(){control.editor.ScrollRelative(control.vertical, -1);},
-                Repeat:function(){control.editor.ScrollRelative(control.vertical, -1);}};
+   functions = {MouseDown:function(){if(!control.editor.busy) control.editor.ScrollRelative(control.vertical, -1);},
+                Repeat:function(){if(!control.editor.busy) control.editor.ScrollRelative(control.vertical, -1);},
+                Disabled: function() {return control.editor.busy;}};
 
    SocialCalc.ButtonRegister(control.lessbutton, params, functions);
 
@@ -2710,8 +3125,9 @@ SocialCalc.CreateTableControl = function(control) {
              normalstyle: "backgroundImage:url("+imageprefix+"-more-"+vh+"n.gif);",
              downstyle: "backgroundImage:url("+imageprefix+"-more-"+vh+"d.gif);",
              hoverstyle: "backgroundImage:url("+imageprefix+"-more-"+vh+"h.gif);"};
-   functions = {MouseDown:function(){control.editor.ScrollRelative(control.vertical, +1);},
-                Repeat:function(){control.editor.ScrollRelative(control.vertical, +1);}};
+   functions = {MouseDown:function(){if(!control.editor.busy) control.editor.ScrollRelative(control.vertical, +1);},
+                Repeat:function(){if(!control.editor.busy) control.editor.ScrollRelative(control.vertical, +1);},
+                Disabled: function() {return control.editor.busy;}};
 
    SocialCalc.ButtonRegister(control.morebutton, params, functions);
 
@@ -2730,7 +3146,8 @@ SocialCalc.CreateTableControl = function(control) {
    AssignID(control.editor, control.scrollarea, "scrollarea"+vh);
 
    params = {repeatwait:scc.TCscrollareaRepeatWait, repeatinterval:scc.TCscrollareaRepeatWait};
-   functions = {MouseDown:SocialCalc.ScrollAreaClick, Repeat:SocialCalc.ScrollAreaClick};
+   functions = {MouseDown:SocialCalc.ScrollAreaClick, Repeat:SocialCalc.ScrollAreaClick,
+                Disabled: function() {return control.editor.busy;}};
    functions.control = control;
 
    SocialCalc.ButtonRegister(control.scrollarea, params, functions);
@@ -2751,7 +3168,8 @@ SocialCalc.CreateTableControl = function(control) {
 
    functions = {MouseDown:SocialCalc.TCTDragFunctionStart,
                 MouseMove: SocialCalc.TCTDragFunctionMove,
-                MouseUp: SocialCalc.TCTDragFunctionStop};
+                MouseUp: SocialCalc.TCTDragFunctionStop,
+                Disabled: function() {return control.editor.busy;}};
    functions.control = control; // make sure this is there
    SocialCalc.DragRegister(control.thumb, control.vertical, !control.vertical, functions);
 
@@ -2775,7 +3193,9 @@ SocialCalc.ScrollAreaClick = function(e, buttoninfo, bobj) {
    var control = bobj.functionobj.control;
    var bposition = SocialCalc.GetElementPosition(bobj.element);
    var clickpos = control.vertical ? buttoninfo.clientY : buttoninfo.clientX;
-
+   if (control.editor.busy) { // ignore if busy - wait for next repeat
+      return;
+      }
    control.editor.PageRelative(control.vertical, clickpos > control.thumbpos ? 1 : -1);
 
    return;
@@ -2890,21 +3310,31 @@ SocialCalc.TCPSDragFunctionStart = function(event, draginfo, dobj) {
    draginfo.trackingline = document.createElement("div");
    draginfo.trackingline.style.height = dobj.vertical ? scc.TCPStrackinglineThickness :
       (editor.tableheight-(editor.headposition.top-editor.gridposition.top))+"px";
-   draginfo.trackingline.style.width = dobj.vertical ? 
+   draginfo.trackingline.style.width = dobj.vertical ?
       (editor.tablewidth-(editor.headposition.left-editor.gridposition.left))+"px" : scc.TCPStrackinglineThickness;
    draginfo.trackingline.style.backgroundImage="url("+editor.imageprefix+"-trackingline-"+(dobj.vertical?"v":"h")+".gif)";;
-   if (scc.TCPtrackinglineClass) draginfo.trackingline.className = scc.TCPtrackinglineClass;
+   if (scc.TCPStrackinglineClass) draginfo.trackingline.className = scc.TCPStrackinglineClass;
    SocialCalc.setStyles(draginfo.trackingline, scc.TCPStrackinglineStyle);
 
    if (dobj.vertical) {
       row = SocialCalc.Lookup(draginfo.clientY+dobj.functionobj.control.sliderthickness, editor.rowpositions);
       draginfo.trackingline.style.top = (editor.rowpositions[row] || editor.headposition.top)+"px";
       draginfo.trackingline.style.left = editor.headposition.left+"px";
+      if (editor.context.rowpanes.length-1) { // has 2 already
+         editor.context.SetRowPaneFirstLast(1, editor.context.rowpanes[0].last+1, editor.context.rowpanes[0].last+1);
+         editor.FitToEditTable();
+         editor.ScheduleRender();
+         }
       }
    else {
       col = SocialCalc.Lookup(draginfo.clientX+dobj.functionobj.control.sliderthickness, editor.colpositions);
       draginfo.trackingline.style.top = editor.headposition.top+"px";
       draginfo.trackingline.style.left = (editor.colpositions[col] || editor.headposition.left)+"px";
+      if (editor.context.colpanes.length-1) { // has 2 already
+         editor.context.SetColPaneFirstLast(1, editor.context.colpanes[0].last+1, editor.context.colpanes[0].last+1);
+         editor.FitToEditTable();
+         editor.ScheduleRender();
+         }
       }
 
    editor.griddiv.appendChild(draginfo.trackingline);
@@ -2968,8 +3398,10 @@ SocialCalc.TCPSDragFunctionStop = function(event, draginfo, dobj) {
          if (editor.context.rowpanes.length>1) editor.context.rowpanes.length = 1;
          }
       else if (editor.context.rowpanes.length-1) { // has 2 already
-         editor.context.SetRowPaneFirstLast(0, editor.context.rowpanes[0].first, row-1);
-         editor.context.SetRowPaneFirstLast(1, row, row);
+         if (!editor.timeout) { // not waiting for position calc (so positions could be wrong)
+            editor.context.SetRowPaneFirstLast(0, editor.context.rowpanes[0].first, row-1);
+            editor.context.SetRowPaneFirstLast(1, row, row);
+            }
          }
       else {
          editor.context.SetRowPaneFirstLast(0, editor.context.rowpanes[0].first, row-1);
@@ -2988,8 +3420,10 @@ SocialCalc.TCPSDragFunctionStop = function(event, draginfo, dobj) {
          if (editor.context.colpanes.length>1) editor.context.colpanes.length = 1;
          }
       else if (editor.context.colpanes.length-1) { // has 2 already
-         editor.context.SetColPaneFirstLast(0, editor.context.colpanes[0].first, col-1);
-         editor.context.SetColPaneFirstLast(1, col, col);
+         if (!editor.timeout) { // not waiting for position calc (so positions could be wrong)
+            editor.context.SetColPaneFirstLast(0, editor.context.colpanes[0].first, col-1);
+            editor.context.SetColPaneFirstLast(1, col, col);
+            }
          }
       else {
          editor.context.SetColPaneFirstLast(0, editor.context.colpanes[0].first, col-1);
@@ -2998,13 +3432,10 @@ SocialCalc.TCPSDragFunctionStop = function(event, draginfo, dobj) {
       }
 
    editor.FitToEditTable();
-   editor.context.CalculateColWidthData();
 
    editor.griddiv.removeChild(draginfo.trackingline);
 
-   editor.EditorRenderSheet();
-
-   editor.SchedulePositionCalculations();
+   editor.ScheduleRender();
 
    }
 
@@ -3136,13 +3567,10 @@ SocialCalc.TCTDragFunctionStop = function(event, draginfo, dobj) {
       }
 
    editor.FitToEditTable();
-   editor.context.CalculateColWidthData();
 
    editor.toplevel.removeChild(draginfo.thumbstatus);
 
-   editor.EditorRenderSheet();
-
-   editor.SchedulePositionCalculations();
+   editor.ScheduleRender();
 
    }
 
@@ -3190,7 +3618,8 @@ SocialCalc.DragRegister = function(element, vertical, horizontal, functionobj) {
 
    if (!functionobj) {
       functionobj = {MouseDown: SocialCalc.DragFunctionStart, MouseMove: SocialCalc.DragFunctionPosition,
-                     MouseUp: SocialCalc.DragFunctionPosition};
+                     MouseUp: SocialCalc.DragFunctionPosition,
+                     Disabled: null};
       }
 
    draginfo.registeredElements.push(
@@ -3221,6 +3650,12 @@ SocialCalc.DragMouseDown = function(event) {
 
    var dobj = SocialCalc.LookupElement(e.target || e.srcElement, draginfo.registeredElements);
    if (!dobj) return;
+
+   if (dobj && dobj.functionobj && dobj.functionobj.Disabled) {
+      if (dobj.functionobj.Disabled(e, draginfo, dobj)) {
+         return;
+         }
+      }
 
    draginfo.draggingElement = dobj;
 
@@ -3566,7 +4001,7 @@ SocialCalc.ButtonInfo = {
    //    .element, .normalstyle, .hoverstyle, .downstyle, .repeatinterval, .functionobj
    //
    // .functionobj is an object with optional function objects for:
-   //    mouseover, mouseout, mousedown, repeatinterval, mouseup
+   //    mouseover, mouseout, mousedown, repeatinterval, mouseup, disabled
 
    registeredElements: [],
 
@@ -3699,6 +4134,12 @@ SocialCalc.ButtonMouseDown = function(event) {
    var bobj = SocialCalc.LookupElement(e.target || e.srcElement, buttoninfo.registeredElements);
 
    if (!bobj) return; // not one of our elements
+
+   if (bobj && bobj.functionobj && bobj.functionobj.Disabled) {
+      if (bobj.functionobj.Disabled(e, buttoninfo, bobj)) {
+         return;
+         }
+      }
 
    buttoninfo.buttonElement = bobj;
    buttoninfo.buttonDown = true;
@@ -3875,9 +4316,17 @@ SocialCalc.ProcessMouseWheel = function(e) {
 //
 // Keyboard functions:
 //
+// For more information about keyboard handling, see: http://unixpapa.com/js/key.html
+//
 // *************************************
 
 SocialCalc.keyboardTables = {
+
+   specialKeysCommon: {
+      8: "[backspace]", 9: "[tab]", 13: "[enter]", 25: "[tab]", 27: "[esc]", 33: "[pgup]", 34: "[pgdn]",
+      35: "[end]", 36: "[home]", 37: "[aleft]", 38: "[aup]", 39: "[aright]", 40: "[adown]", 45: "[ins]",
+      46: "[del]"
+      },
 
    specialKeysIE: {
       8: "[backspace]", 9: "[tab]", 13: "[enter]", 25: "[tab]", 27: "[esc]", 33: "[pgup]", 34: "[pgdn]",
@@ -3936,7 +4385,11 @@ SocialCalc.keyboardTables = {
 SocialCalc.Keyboard = {
    areListener: false, // if true, we have been installed as a listener for keyboard events
    focusTable: null, // the table editor object that gets keystrokes or null
-   passThru: null // if not null, control element with focus to pass keyboard events to (has blur method), or "true"
+   passThru: null, // if not null, control element with focus to pass keyboard events to (has blur method), or "true"
+   didProcessKey: false, // did SocialCalc.ProcessKey in keydown
+   statusFromProcessKey: false, // the status from the keydown SocialCalc.ProcessKey
+   repeatingKeyPress: false, // some browsers (Opera, Gecko Mac) repeat special keys as KeyPress not KeyDown
+   chForProcessKey: "" // remember so can do repeat in those cases
    };
 
 SocialCalc.KeyboardSetFocus = function(editor) {
@@ -3963,6 +4416,149 @@ SocialCalc.KeyboardFocus = function() {
    window.focus();
 
    }
+
+SocialCalc.ProcessKeyDown = function(e) {
+
+   var kt = SocialCalc.keyboardTables;
+   kt.didProcessKey = false; // always start false
+   kt.statusFromProcessKey = false;
+   kt.repeatingKeyPress = false;
+
+   var ch="";
+   var status=true;
+
+   if (SocialCalc.Keyboard.passThru) return; // ignore
+
+   e = e || window.event;
+
+   if (e.which==undefined) { // IE
+      ch = kt.specialKeysCommon[e.keyCode];
+      if (!ch) {
+         if (e.ctrlKey) {
+            ch=kt.controlKeysIE[e.keyCode];
+            }
+         if (!ch)
+            return true;
+         }
+
+      status = SocialCalc.ProcessKey(ch, e);
+
+      if (!status) {
+         if (e.preventDefault) e.preventDefault();
+            e.returnValue = false;
+         }
+      }
+
+   else {
+      ch = kt.specialKeysCommon[e.keyCode];
+      if (!ch) {
+         return true;
+         }
+
+      status = SocialCalc.ProcessKey(ch, e); // process the key
+      kt.didProcessKey = true; // remember what happened
+      kt.statusFromProcessKey = status;
+      kt.chForProcessKey = ch;
+      }
+
+   return status;
+
+   }
+
+SocialCalc.ProcessKeyPress = function(e) {
+
+   var kt = SocialCalc.keyboardTables;
+
+   var ch="";
+
+   e = e || window.event;
+
+   if (SocialCalc.Keyboard.passThru) return; // ignore
+
+   if (kt.didProcessKey) { // already processed this key
+      if (kt.repeatingKeyPress) {
+         return SocialCalc.ProcessKey(kt.chForProcessKey, e); // process the same key as on KeyDown
+         }
+      else {
+         kt.repeatingKeyPress = true; // see if get another KeyPress before KeyDown
+         return kt.statusFromProcessKey; // do what it said to do
+         }
+      }
+
+   if (e.which==undefined) { // IE
+      // Note: Esc and Enter will come through here, too, if not stopped at KeyDown
+      ch=String.fromCharCode(e.keyCode); // convert to a character (special chars handled at ev1)
+      }
+
+   else { // not IE
+      if (!e.which)
+         return false; // ignore - special key
+      if (e.charCode==undefined) { // Opera
+         if (e.which!=0) { // character
+            if (e.which<32 || e.which==144) { // special char (144 is numlock)
+               ch = kt.specialKeysOpera[e.which];
+               if (ch) {
+                  return true;
+                  }
+               }
+            else {
+               if (e.ctrlKey) {
+                  ch=kt.controlKeysOpera[e.keyCode];
+                  }
+               else {
+                  ch = String.fromCharCode(e.which);
+                  }
+               }
+            }
+         else { // special char
+            return true;
+            }
+         }
+
+      else if (e.keyCode==0 && e.charCode==0) { // OLPC Fn key or something
+         return; // ignore
+         }
+
+      else if (e.keyCode==e.charCode) { // Safari
+         ch = kt.specialKeysSafari[e.keyCode];
+         if (!ch) {
+            if (kt.ignoreKeysSafari[e.keyCode]) // pass this through
+               return true;
+            if (e.metaKey) {
+               ch=kt.controlKeysSafari[e.keyCode];
+               }
+            else {
+               ch = String.fromCharCode(e.which);
+               }
+            }
+         }
+
+      else { // Firefox
+         if (kt.specialKeysFirefox[e.keyCode]) {
+            return true;
+            }
+         ch = String.fromCharCode(e.which);
+         if (e.ctrlKey || e.metaKey) {
+            ch = kt.controlKeysFirefox[e.which];
+            }
+         }
+      }
+
+   var status = SocialCalc.ProcessKey(ch, e);
+
+   if (!status) {
+      if (e.preventDefault) e.preventDefault();
+      e.returnValue = false;
+      }
+
+   return status;
+
+   }
+
+/*
+ *
+ * OLD ProcessKeyDown and ProcessKeyPress -- replaced for handling newer browsers, including Safari 3.1 and Opera 9.5
+ *
 
 SocialCalc.ProcessKeyDown = function(e) {
 
@@ -4088,6 +4684,7 @@ SocialCalc.ProcessKeyPress = function(e) {
    return status;
 
    }
+*/
 
 //
 // status = SocialCalc.ProcessKey(ch, e)

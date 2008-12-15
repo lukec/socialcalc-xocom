@@ -7,7 +7,7 @@
 // All Rights Reserved.
 //
 // The contents of this file are subject to the Artistic License 2.0; you may not
-// use this file except in compliance with the License. You may obtain a copy of 
+// use this file except in compliance with the License. You may obtain a copy of
 // the License at http://socialcalc.org/licenses/al-20/.
 //
 // Some of the other files in the SocialCalc package are licensed under
@@ -43,7 +43,7 @@ SocialCalc.Formula = {};
    SocialCalc.Formula.TokenType = {num: 1, coord: 2, op: 3, name: 4, error: 5, string: 6, space: 7};
 
    SocialCalc.Formula.CharClass = {num: 1, numstart: 2, op: 3, eof: 4, alpha: 5, incoord: 6, error: 7, quote: 8, space: 9, specialstart: 10};
- 
+
    SocialCalc.Formula.CharClassTable = {
       " ": 9, "!": 3, '"': 8, "#": 10, "$":6, "%":3, "&":3, "(": 3, ")": 3, "*": 3, "+": 3, ",": 3, "-": 3, ".": 2, "/": 3,
        "0": 1, "1": 1, "2": 1, "3": 1, "4": 1, "5": 1, "6": 1, "7": 1, "8": 1, "9": 1,
@@ -94,7 +94,7 @@ SocialCalc.Formula = {};
    //    'type1a': '|type2a:resulta|type2b:resultb|...
    //    Type of t* or n* matches any of those types not listed
    //    Results may be a type or the numbers 1 or 2 specifying to return type1 or type2
-   
+
 
    SocialCalc.Formula.TypeLookupTable = {
        unaryminus: { 'n*': '|n*:1|', 'e*': '|e*:1|', 't*': '|t*:e#VALUE!|', 'b': '|b:n|'},
@@ -723,10 +723,10 @@ SocialCalc.Formula.EvaluatePolish = function(parseinfo, revpolish, sheet, allowr
                }
             else if (value1.type.charAt(0) == "e") { // error on left
                PushOperand(value1.type, 0);
-               }               
+               }
             else if (value2.type.charAt(0) == "e") { // error on right
                PushOperand(value2.type, 0);
-               }               
+               }
             else { // text maybe mixed with numbers or blank
                tostype = value1.type.charAt(0);
                tostype2 = value2.type.charAt(0);
@@ -1086,9 +1086,9 @@ SocialCalc.Formula.OperandValueAndType = function(sheet, operand) {
       if (pos != -1) { // sheet reference
          coordsheet = scf.FindInSheetCache(result.value.substring(pos+1)); // get other sheet
          if (coordsheet == null) { // unavailable
-            result.value = 0;
             result.type = "e#REF!";
             result.error = SocialCalc.Constants.s_sheetunavailable+" "+result.value.substring(pos+1);
+            result.value = 0;
             return result;
             }
          result.value = result.value.substring(0, pos); // get coord part
@@ -1178,7 +1178,7 @@ SocialCalc.Formula.OperandsAsCoordOnSheet = function(sheet, operand) {
 
    sheetname = scf.OperandAsSheetName(sheet, operand); // get sheetname as text
    othersheet = scf.FindInSheetCache(sheetname.value);
-   if (othersheet == null) {
+   if (othersheet == null) { // unavailable
       result.type = "e#REF!";
       result.value = 0;
       result.error = SocialCalc.Constants.s_sheetunavailable+" "+sheetname.value;
@@ -1207,7 +1207,7 @@ SocialCalc.Formula.OperandsAsCoordOnSheet = function(sheet, operand) {
       result.value = 0;
       }
    return result;
-   
+
    }
 
 /*
@@ -1422,7 +1422,7 @@ SocialCalc.Formula.StepThroughRangeDown = function(operand, rangevalue) {
       }
 
    rp = scf.OrderRangeParts(value1, value2);
-   
+
    count = 0;
    for (r=rp.r1; r<=rp.r2; r++) {
       for (c=rp.c1; c<=rp.c2; c++) {
@@ -1478,7 +1478,7 @@ SocialCalc.Formula.DecodeRangeParts = function(sheetdata, range) {
    coordsheetdata = sheetdata;
    if (sheet1) { // sheet reference
       coordsheetdata = scf.FindInSheetCache(sheet1);
-      if (coordsheetdata == null) { // this sheet is unavailable
+      if (coordsheetdata == null) { // unavailable
          return null;
          }
       }
@@ -2098,7 +2098,7 @@ SocialCalc.Formula.FieldToColnum = function(sheet, col1num, ncols, row1num, fiel
       value = (value+"").toLowerCase(); // ignore case
       if (value == fieldname) { // match
          return colnum+1;
-         }         
+         }
       }
    return 0; // looked at all and no match
 
@@ -2379,7 +2379,7 @@ SocialCalc.Formula.IndexFunction = function(fname, operand, foperand, sheet) {
             }
          else {
             result = SocialCalc.crToCoord(indexinfo.col1num, indexinfo.row1num) + "|" +
-                     SocialCalc.crToCoord(indexinfo.col1num+indexinfo.ncols-1, indexinfo.row1num+indexinfo.nrows-1) + 
+                     SocialCalc.crToCoord(indexinfo.col1num+indexinfo.ncols-1, indexinfo.row1num+indexinfo.nrows-1) +
                      "|";
             resulttype = "range";
             }
@@ -2930,7 +2930,7 @@ SocialCalc.Formula.StringFunctions = function(fname, operand, foperand, sheet) {
 
       case "PROPER":
          result = operand_value[1].replace(/\b\w+\b/g, function(word) {
-                     return word.substring(0,1).toUpperCase() + 
+                     return word.substring(0,1).toUpperCase() +
                         word.substring(1);
                      }); // uppercase first character of words (see JavaScript, Flanagan, 5th edition, page 704)
          resulttype = "t";
@@ -2943,7 +2943,7 @@ SocialCalc.Formula.StringFunctions = function(fname, operand, foperand, sheet) {
             result = "Bad arguments";
             }
          else {
-            result = operand_value[1].substring(0, start-1) + operand_value[4] + 
+            result = operand_value[1].substring(0, start-1) + operand_value[4] +
                operand_value[1].substring(start-1+len);
             resulttype = "t";
             }
@@ -3438,7 +3438,7 @@ SocialCalc.Formula.Math2Functions = function(fname, operand, foperand, sheet) {
                }
             }
          }
- 
+
    operand.push(result);
 
    return null;
@@ -4124,7 +4124,7 @@ SocialCalc.Formula.InterestFunctions = function(fname, operand, foperand, sheet)
                break;
          }
       }
- 
+
    scf.PushOperand(operand, resulttype, result);
 
    return;
@@ -4285,39 +4285,86 @@ SocialCalc.Formula.FunctionList["IRR"] = [SocialCalc.Formula.IRRFunction, -1];
 //
 
 SocialCalc.Formula.SheetCache = {
-   loadsheet: // must be a function that returns a string with saved data or null
-      function(sheetname) {return null;},
-   sheets: {} // contains an object for each sheet in cache (sheet-obj may be null): {sheet: sheet-obj}
+
+   // Sheet data: Attributes are each sheet in the cache with values of an object with:
+   //
+   //    sheet: sheet-obj (or null, meaning not found)
+   //    recalcstate: constants.asloaded = as loaded
+   //                 constants.recalcing = being recalced now
+   //                 constants.recalcdone = recalc done
+   //
+
+   sheets: {},
+
+   // Waiting for loading:
+   // If sheet is not in cache, this is set to the sheetname being loaded
+   // so it can be tested in the recalc loop to start load and then wait until restarted.
+   // Reset to null before restarting.
+
+   waitingForLoading: null,
+
+   // Constants to use for setting sheets[*].recalcstate:
+
+   constants: {asloaded: 0, recalcing: 1, recalcdone: 2},
+
+   loadsheet: null // (deprecated - use SocialCalc.RecalcInfo.LoadSheet)
+
    };
 
 //
 // othersheet = SocialCalc.Formula.FindInSheetCache(sheetname)
 //
-// Returns a SocialCalc.Sheet object corresponding to string sheetname or null if the sheet is not available or in error.
+// Returns a SocialCalc.Sheet object corresponding to string sheetname
+// or null if the sheet is not available or in error.
+//
 // Each sheet is loaded only once and then stored in a cache.
-// The loading is done by a callback.
+// Loading is handled elsewhere, e.g., in the recalc loop.
 //
 
 SocialCalc.Formula.FindInSheetCache = function(sheetname) {
 
-   var str, othersheet;
+   var str;
    var sfsc = SocialCalc.Formula.SheetCache;
 
-   if (sfsc.sheets[sheetname]) {
-      return sfsc.sheets[sheetname].sheet;
+   if (sfsc.sheets[sheetname]) { // a sheet by that name is in the cache already
+      return sfsc.sheets[sheetname].sheet; // return it
       }
 
-   str = sfsc.loadsheet(sheetname);
-   if (str == null) {
-      return null;
+   if (sfsc.waitingForLoading) { // waiting already - only queue up one
+      return null; // return not found
       }
 
-   othersheet = new SocialCalc.Sheet();
-   othersheet.ParseSheetSave(str);
+   if (sfsc.loadsheet) { // Deprecated old format synchronous callback
+      return SocialCalc.Formula.AddSheetToCache(sheetname, sfsc.loadsheet(sheetname));
+      }
 
-   sfsc.sheets[sheetname] = {sheet: othersheet};
+   sfsc.waitingForLoading = sheetname; // let recalc loop know that we have a sheet to load
 
-   return othersheet;
+   return null; // return not found
+
+   }
+
+//
+// newsheet = SocialCalc.Formula.AddSheetToCache(sheetname, str)
+//
+// Adds a new sheet to the sheet cache.
+// Returns the sheet object filled out with the str (a saved sheet).
+//
+
+SocialCalc.Formula.AddSheetToCache = function(sheetname, str) {
+
+   var newsheet = null;
+   var sfsc = SocialCalc.Formula.SheetCache;
+   var sfscc = sfsc.constants;
+
+   if (str) {
+      newsheet = new SocialCalc.Sheet();
+      newsheet.ParseSheetSave(str);
+      }
+
+   sfsc.sheets[sheetname] = {sheet: newsheet, recalcstate: sfscc.asloaded};
+
+   return newsheet;
 
    }
 
