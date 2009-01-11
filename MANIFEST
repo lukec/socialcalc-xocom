@@ -1,8 +1,7 @@
 NEWS
 TODO
-create-dev-env.pl
+
 setup.py
-test-web-view.py
 SocialCalcActivity.py
 XOCom.py
 po/.exists
