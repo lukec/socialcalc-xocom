@@ -8,3 +8,18 @@ The project homepage is:
 
   https://www.socialtext.net/lukec/?socialcalc_xocom
 
+
+Instructions to install it on your OLPC:
+
+* Open the terminal, we will delete the old package (if it is there)
+> rm -rf ~/Activities/SocialCalcActivity.activity
+
+* Restart Sugar (only necessary if you deleted the old package)
+** Hit Ctrl, Alt, Backspace
+
+* Open the terminal again
+> wget http://is.gd/fqnd -O socialcalc.xo
+> sugar-install-bundle socialcalc.xo
+
+* It should appear on your OLPC home page now
+
