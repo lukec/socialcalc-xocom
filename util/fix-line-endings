@@ -1,0 +1,16 @@
+#!/bin/bash
+
+FLIP=/usr/bin/flip
+
+if [ ! -e $FLIP ]; then
+    echo "$FLIP is not found! :(";
+    exit -1;
+fi
+
+
+for f in $(find web -type f -name *.js); do
+    echo "Fixing $f"
+    flip -u $f
+    perl -pi -e 's/\s+\n$/\n/mg' $f;
+done
+
