@@ -6,7 +6,7 @@
 // All Rights Reserved.
 //
 // The contents of this file are subject to the Artistic License 2.0; you may not
-// use this file except in compliance with the License. You may obtain a copy of 
+// use this file except in compliance with the License. You may obtain a copy of
 // the License at http://socialcalc.org/licenses/al-20/.
 //
 // Some of the other files in the SocialCalc package are licensed under
@@ -127,13 +127,13 @@ SocialCalc.Constants = {
    defaultHighlightTypeRangeClass: "",
    defaultHighlightTypeRangeStyle: "color:#000;backgroundColor:#E5E5E5;",
 
-   defaultColnameClass: "", // regular column heading letters, needs a cursor property 
+   defaultColnameClass: "", // regular column heading letters, needs a cursor property
    defaultColnameStyle: "font-size:small;text-align:center;color:#FFFFFF;background-color:#808080;cursor:e-resize;",
-   defaultSelectedColnameClass: "", // column with selected cell, needs a cursor property 
+   defaultSelectedColnameClass: "", // column with selected cell, needs a cursor property
    defaultSelectedColnameStyle: "font-size:small;text-align:center;color:#FFFFFF;background-color:#404040;cursor:e-resize;",
    defaultRownameClass: "", // regular row heading numbers
    defaultRownameStyle: "font-size:small;text-align:right;color:#FFFFFF;background-color:#808080;",
-   defaultSelectedRownameClass: "", // column with selected cell, needs a cursor property 
+   defaultSelectedRownameClass: "", // column with selected cell, needs a cursor property
    defaultSelectedRownameStyle: "font-size:small;text-align:right;color:#FFFFFF;background-color:#404040;",
    defaultUpperLeftClass: "", // Corner cell in upper left
    defaultUpperLeftStyle: "font-size:small;",
@@ -317,7 +317,7 @@ SocialCalc.ConstantsDefaultClasses = {
    defaultColname: "",
    defaultSelectedColname: "",
    defaultRowname: "",
-   defaultSelectedRowname: "", 
+   defaultSelectedRowname: "",
    defaultUpperLeft: "",
    defaultSkippedCell: "",
    defaultPaneDivider: "",
