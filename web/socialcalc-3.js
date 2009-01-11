@@ -4154,14 +4154,22 @@ SocialCalc.Lookup = function(value, list) {
 
 SocialCalc.setStyles = function (element, cssText) {
 
-   var parts, part, namevalue;
+   var parts, part, pos, name, value;
 
    if (!cssText) return;
 
    parts = cssText.split(";");
    for (part=0; part<parts.length; part++) {
-      namevalue = parts[part].split(":");
-      if (namevalue[0]) element.style[namevalue[0]] = namevalue[1];
+      pos = parts[part].indexOf(":"); // find first colon (could be one in url)
+      if (pos != -1) {
+         name = parts[part].substring(0, pos);
+         value = parts[part].substring(pos+1);
+         if (name && value) { // if non-null name and value, set style
+            element.style[name] = value;
+            }
+         }
+//      namevalue = parts[part].split(":");
+//      if (namevalue[0]) element.style[namevalue[0]] = namevalue[1];
       }
 
    }

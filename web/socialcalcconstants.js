@@ -110,7 +110,7 @@ SocialCalc.Constants = {
    defaultPaneDividerWidth: "2", // a string
    defaultPaneDividerHeight: "3", // a string
 
-   defaultGridCSS: "1px solid #ECECEC;", // used as style to set each border when grid enabled
+   defaultGridCSS: "1px solid #C0C0C0;", // used as style to set each border when grid enabled (was #ECECEC)
 
    defaultCommentClass: "", // class added to cells with non-null comments when grid enabled
    defaultCommentStyle: "background-repeat:no-repeat;background-position:top right;background-image:url(images/sc-commentbg.gif);", // style added to cells with non-null comments when grid enabled
@@ -140,7 +140,7 @@ SocialCalc.Constants = {
    defaultSkippedCellClass: "", // used if present for spanned cells peeking into a pane (at least one of class/style needed)
    defaultSkippedCellStyle: "font-size:small;background-color:#CCC", // used if present
    defaultPaneDividerClass: "", // used if present for the look of the space between panes (at least one of class/style needed)
-   defaultPaneDividerStyle: "font-size:small;background-color:#ECECEC;padding:0px;", // used if present
+   defaultPaneDividerStyle: "font-size:small;background-color:#C0C0C0;padding:0px;", // used if present
 
    s_rcMissingSheet: "Render Context must have a sheet object", // unlikely thrown error
 

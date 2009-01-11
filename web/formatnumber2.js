@@ -91,7 +91,7 @@ SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_strin
 
    rawvalue = rawvalue-0; // make sure a number
    value = rawvalue;
-   if (value == Number.NaN) return "NaN";
+   if (!isFinite(value)) return "NaN";
 
    var negativevalue = value < 0 ? 1 : 0; // determine sign, etc.
    if (negativevalue) value = -value;
@@ -189,6 +189,7 @@ SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_strin
    scaledvalue = scaledvalue / decimalscale;
 
    if (typeof scaledvalue != "number") return "NaN";
+   if (!isFinite(scaledvalue)) return "NaN";
 
    strvalue = scaledvalue+""; // convert to string (Number.toFixed doesn't do all we need)
 
@@ -404,10 +405,12 @@ SocialCalc.FormatNumber.formatNumberWithFormat = function(rawvalue, format_strin
 
          // *** Cut down number of significant digits to avoid floating point artifacts:
 
-         var factor = Math.floor(Math.LOG10E * Math.log(value)); // get integer magnitude as a power of 10
-         factor = Math.pow(10, 13-factor); // turn into scaling factor
-         value = Math.floor(factor * value + 0.5)/factor; // scale positive value, round, undo scaling
-
+         if (value!=0) { // only if non-zero
+            var factor = Math.floor(Math.LOG10E * Math.log(value)); // get integer magnitude as a power of 10
+            factor = Math.pow(10, 13-factor); // turn into scaling factor
+            value = Math.floor(factor * value + 0.5)/factor; // scale positive value, round, undo scaling
+            if (!isFinite(value)) return "NaN";
+            }
          if (negativevalue) {
             result += "-";
             }

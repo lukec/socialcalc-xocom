@@ -406,6 +406,12 @@ SocialCalc.CreateTableEditor = function(editor, width, height) {
 
    SocialCalc.MouseWheelRegister(editor.toplevel, {WheelMove: SocialCalc.EditorProcessMouseWheel, editor: editor});
 
+   if (editor.inputBox) { // this seems to fix an obscure bug with Firefox 2 Mac where Ctrl-V doesn't get fired right
+      if (editor.inputBox.element) {
+         editor.inputBox.element.focus();
+         editor.inputBox.element.blur();
+         }
+      }
    SocialCalc.KeyboardSetFocus(editor);
 
    // do status reporting things
@@ -595,6 +601,7 @@ SocialCalc.EditorRenderSheet = function(editor) {
    editor.EditorMouseUnregister();
 
    editor.fullgrid = editor.context.RenderSheet(editor.fullgrid);
+
    if (editor.ecell) editor.SetECellHeaders("selected");
 
    SocialCalc.AssignID(editor, editor.fullgrid, "fullgrid"); // give it an id
@@ -4440,7 +4447,6 @@ SocialCalc.ProcessKeyDown = function(e) {
          if (!ch)
             return true;
          }
-
       status = SocialCalc.ProcessKey(ch, e);
 
       if (!status) {
@@ -4452,7 +4458,12 @@ SocialCalc.ProcessKeyDown = function(e) {
    else {
       ch = kt.specialKeysCommon[e.keyCode];
       if (!ch) {
-         return true;
+//         return true;
+         if (e.ctrlKey || e.metaKey) {
+            ch=kt.controlKeysIE[e.keyCode]; // this works here
+            }
+         if (!ch)
+            return true;
          }
 
       status = SocialCalc.ProcessKey(ch, e); // process the key
@@ -4474,7 +4485,6 @@ SocialCalc.ProcessKeyPress = function(e) {
    e = e || window.event;
 
    if (SocialCalc.Keyboard.passThru) return; // ignore
-
    if (kt.didProcessKey) { // already processed this key
       if (kt.repeatingKeyPress) {
          return SocialCalc.ProcessKey(kt.chForProcessKey, e); // process the same key as on KeyDown

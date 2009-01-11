@@ -1363,7 +1363,7 @@ SocialCalc.UpdateSortRangeProposal = function(editor) {
 
 SocialCalc.LoadColumnChoosers = function(spreadsheet) {
 
-   var sortrange, nrange, rparts, col, colname, sele;
+   var sortrange, nrange, rparts, col, colname, sele, oldindex;
 
    if (spreadsheet.sortrange && spreadsheet.sortrange.indexOf(":")==-1) { // sortrange is a named range
       nrange = SocialCalc.Formula.LookupName(spreadsheet.sheet, spreadsheet.sortrange || "");
@@ -1380,29 +1380,32 @@ SocialCalc.LoadColumnChoosers = function(spreadsheet) {
       }
    var range = SocialCalc.ParseRange(sortrange);
    sele = document.getElementById(spreadsheet.idPrefix+"majorsort");
+   oldindex = sele.selectedIndex;
    sele.options.length = 0;
    sele.options[sele.options.length] = new Option("[none]", "");
    for (var col=range.cr1.col; col<=range.cr2.col; col++) {
       colname = SocialCalc.rcColname(col);
       sele.options[sele.options.length] = new Option("Column "+colname, colname);
       }
-   sele.selectedIndex = 1;
+   sele.selectedIndex = oldindex > 1 && oldindex <= (range.cr2.col-range.cr1.col+1) ? oldindex : 1; // restore what was there if reasonable
    sele = document.getElementById(spreadsheet.idPrefix+"minorsort");
+   oldindex = sele.selectedIndex;
    sele.options.length = 0;
    sele.options[sele.options.length] = new Option("[none]", "");
    for (var col=range.cr1.col; col<=range.cr2.col; col++) {
       colname = SocialCalc.rcColname(col);
       sele.options[sele.options.length] = new Option(colname, colname);
       }
-   sele.selectedIndex = 0;
+   sele.selectedIndex = oldindex > 0 && oldindex <= (range.cr2.col-range.cr1.col+1) ? oldindex : 0; // default to [none]
    sele = document.getElementById(spreadsheet.idPrefix+"lastsort");
+   oldindex = sele.selectedIndex;
    sele.options.length = 0;
    sele.options[sele.options.length] = new Option("[none]", "");
    for (var col=range.cr1.col; col<=range.cr2.col; col++) {
       colname = SocialCalc.rcColname(col);
       sele.options[sele.options.length] = new Option(colname, colname);
       }
-   sele.selectedIndex = 0;
+   sele.selectedIndex = oldindex > 0 && oldindex <= (range.cr2.col-range.cr1.col+1) ? oldindex : 0; // default to [none]
 
    }
 
@@ -1964,7 +1967,13 @@ SocialCalc.SpreadsheetControlSortLoad = function(s, setting, line, flags) {
    parts = line.split(":");
    spreadsheet.sortrange = SocialCalc.decodeFromSave(parts[1]);
    ele = document.getElementById(spreadsheet.idPrefix+"sortbutton");
-   ele.value = "Sort "+spreadsheet.sortrange;
+   if (spreadsheet.sortrange) {
+      ele.value = "Sort "+spreadsheet.sortrange;
+      ele.style.visibility = "visible";
+      }
+   else {
+      ele.style.visibility = "hidden";
+      }
    SocialCalc.LoadColumnChoosers(spreadsheet);
 
    sele = document.getElementById(spreadsheet.idPrefix+"majorsort");
@@ -2795,6 +2804,10 @@ SocialCalc.SettingsControls.CreateColorChooser = function (parent, subject, ctrl
    grid.msg.style.height = "16px";
    grid.msg.style.fontSize = "10px";
    grid.msg.innerHTML = "&nbsp;";
+   grid.msg.onclick = function(){
+      grid.parent.style.display="none";
+      sc.Controls.ColorCombo.grid = null;
+      };
    grid.div.appendChild(grid.msg);
 
    if (c.firstChild) {
